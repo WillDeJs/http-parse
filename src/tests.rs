@@ -2,14 +2,14 @@ use crate::{HttpHeader, HttpMethod, HttpVersion};
 
 #[test]
 fn test_response() {
-    let response = r#"HTTP/1.1 200 OK
-Content-Type: text/html; charset=UTF-8
-Date: Fri, 21 Jun 2024 14:18:33 GMT
-Last-Modified: Thu, 17 Oct 2019 07:18:26 GMT
-Content-Length: 1234
-
+    let response = "HTTP/1.1 200 OK\r
+Content-Type: text/html; charset=UTF-8\r
+Date: Fri, 21 Jun 2024 14:18:33 GMT\r
+Last-Modified: Thu, 17 Oct 2019 07:18:26 GMT\r
+Content-Length: 1234\r
+\r
 <!doctype html>
-<!-- HTML content follows -->"#;
+<!-- HTML content follows -->";
 
     let mut parser = crate::HttpParser::new(response.as_bytes());
     let response = parser.parse_response().unwrap();
@@ -26,12 +26,26 @@ Content-Length: 1234
     assert_eq!(String::from_utf8_lossy(response.data()), data.to_string());
     assert_eq!(Some(&my_header), response.header("date"));
 }
+#[test]
+fn test_response_bytes() {
+    let response_text = "HTTP/1.1 200 OK\r
+Content-Type: text/html; charset=UTF-8\r
+Date: Fri, 21 Jun 2024 14:18:33 GMT\r
+Last-Modified: Thu, 17 Oct 2019 07:18:26 GMT\r
+Content-Length: 1234\r
+\r
+<!doctype html><!-- HTML content follows -->";
+
+    let mut parser = crate::HttpParser::new(response_text.as_bytes());
+    let response = parser.parse_response().unwrap();
+    assert_eq!(response_text.as_bytes(), &response.into_bytes());
+}
 
 #[test]
 fn test_request() {
-    let request = r#"GET / HTTP/1.1
-Host: developer.mozilla.org
-Accept-Language: fr"#;
+    let request = "GET / HTTP/1.1\r
+Host: developer.mozilla.org\r
+Accept-Language: fr\r\n";
 
     let request = crate::HttpRequest::from_bytes(request.as_bytes()).unwrap();
     assert_eq!(request.version(), HttpVersion::Http1);
@@ -41,4 +55,11 @@ Accept-Language: fr"#;
         value: "developer.mozilla.org".to_string(),
     };
     assert_eq!(request.header("host"), Some(&my_header));
+}
+#[test]
+fn test_request_bytes() {
+    let request_text = "GET / HTTP/1.1\r\nHost: developer.mozilla.org\r\nAccept-Language: fr\r\n";
+
+    let request = crate::HttpRequest::from_bytes(request_text.as_bytes()).unwrap();
+    assert_eq!(&request.into_bytes(), request_text.as_bytes());
 }

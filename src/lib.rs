@@ -10,7 +10,7 @@ pub enum MsgType {
     Response,
 }
 
-#[derive(Debug,Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum HttpMethod {
     Post,
     Get,
@@ -39,14 +39,14 @@ impl Display for HttpMethod {
     }
 }
 
-#[derive( Debug)]
+#[derive(Debug)]
 pub struct HttpHeader {
     pub name: String,
     pub value: String,
 }
 impl PartialEq for HttpHeader {
     fn eq(&self, other: &Self) -> bool {
-        self.name.to_lowercase().eq(&other.name.to_lowercase()) && self.value ==other.value
+        self.name.to_lowercase().eq(&other.name.to_lowercase()) && self.value == other.value
     }
 }
 impl Display for HttpHeader {
@@ -99,7 +99,7 @@ impl HttpRequest {
             },
         }
     }
-    
+
     pub fn with_method(mut self, method: HttpMethod) -> Self {
         self.method = method;
         self
@@ -117,23 +117,55 @@ impl HttpRequest {
     pub fn version(&self) -> HttpVersion {
         self.version
     }
+    pub fn headers(&self) -> Vec<&HttpHeader> {
+        self.headers.iter().map(|h| h).collect()
+    }
     pub fn header(&self, name: &str) -> Option<&HttpHeader> {
         self.headers
             .iter()
             .find(|header| header.name.to_lowercase().eq(&name.to_lowercase()))
     }
     pub fn put_header(&mut self, name: &str, value: &str) {
-        if let Some(index) = self.headers.iter().position(|header| header.name.to_lowercase().eq(&name.to_lowercase())) {
-            self.headers[index].value=value.to_string();
+        if let Some(index) = self
+            .headers
+            .iter()
+            .position(|header| header.name.to_lowercase().eq(&name.to_lowercase()))
+        {
+            self.headers[index].value = value.to_string();
         } else {
-            self.headers.push( HttpHeader {
+            self.headers.push(HttpHeader {
                 name: name.to_string(),
-                value: value.to_string()
+                value: value.to_string(),
             });
         }
     }
     pub fn method(&self) -> HttpMethod {
         self.method
+    }
+    pub fn into_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        // first line, version + status code  + msg
+        bytes.extend_from_slice(
+            &format!(
+                "{} {} {}\r\n",
+                self.method(),
+                self.url.inner,
+                self.version()
+            )
+            .into_bytes(),
+        );
+        // next all headers
+        for header in self.headers() {
+            bytes.extend_from_slice(&format!("{}\r\n", header).into_bytes());
+        }
+
+        // next the body
+        if !self.body.is_empty() {
+            bytes.push(b'\r');
+            bytes.push(b'\n');
+            bytes.extend_from_slice(&self.body);
+        }
+        bytes
     }
 }
 
@@ -199,16 +231,48 @@ impl HttpResponse {
             .find(|header| header.name.to_lowercase().eq(&name.to_lowercase()))
     }
     pub fn put_header(&mut self, name: &str, value: &str) {
-        if let Some(index) = self.headers.iter().position(|header| header.name.to_lowercase().eq(&name.to_lowercase())) {
-            self.headers[index].value=value.to_string();
+        if let Some(index) = self
+            .headers
+            .iter()
+            .position(|header| header.name.to_lowercase().eq(&name.to_lowercase()))
+        {
+            self.headers[index].value = value.to_string();
         } else {
-            self.headers.push( HttpHeader {
+            self.headers.push(HttpHeader {
                 name: name.to_string(),
-                value: value.to_string()
+                value: value.to_string(),
             });
         }
     }
-    
+
+    pub fn headers(&self) -> Vec<&HttpHeader> {
+        self.headers.iter().map(|h| h).collect()
+    }
+    pub fn into_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        // first line, version + status code  + msg
+        bytes.extend_from_slice(
+            &format!(
+                "{} {} {}\r\n",
+                self.version(),
+                self.status_code(),
+                self.status_msg()
+            )
+            .into_bytes(),
+        );
+        // next all headers
+        for header in self.headers() {
+            bytes.extend_from_slice(&format!("{}\r\n", header).into_bytes());
+        }
+
+        // next the body
+        if !self.body.is_empty() {
+            bytes.push(b'\r');
+            bytes.push(b'\n');
+            bytes.extend_from_slice(&self.body);
+        }
+        bytes
+    }
 }
 
 impl Display for HttpResponse {
@@ -274,7 +338,7 @@ impl HttpParser {
     fn parse_url(url: &[u8]) -> Url {
         let url_string = String::from_utf8_lossy(url);
         Url {
-            inner: url_string.to_string(),
+            inner: url_string.trim().to_string(),
         }
     }
     fn parse_status_code(status_code: &[u8]) -> Result<usize, Error> {
@@ -295,13 +359,17 @@ impl HttpParser {
         let mut headers = Vec::new();
         let mut line = String::new();
         while let Ok(_) = self.inner.read_line(&mut line) {
+            // empty line between request and body, we are done
             if line.trim().is_empty() {
                 break;
             } else {
                 if let Some(index) = line.find(':') {
                     if index < line.len() {
                         let name = line[0..index].to_string().trim().to_string();
-                        let value = line[index + 1..line.len() - 1].trim_ascii_start().to_string();
+                        let value = line[index + 1..line.len()]
+                            .trim_ascii_start()
+                            .replace(&['\r', '\n'], "")
+                            .to_string();
                         headers.push(HttpHeader { name, value });
                     }
                 }
