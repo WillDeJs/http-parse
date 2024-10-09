@@ -1,14 +1,8 @@
 use std::fmt::Display;
-use std::io::{BufRead, Error, Read};
+use std::io:: Error;
 
 #[cfg(test)]
 mod tests;
-
-#[derive(PartialEq)]
-pub enum MsgType {
-    Request,
-    Response,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum HttpMethod {
@@ -118,7 +112,7 @@ impl HttpRequest {
         self.version
     }
     pub fn headers(&self) -> Vec<&HttpHeader> {
-        self.headers.iter().map(|h| h).collect()
+        self.headers.iter().collect()
     }
     pub fn header(&self, name: &str) -> Option<&HttpHeader> {
         self.headers
@@ -246,7 +240,7 @@ impl HttpResponse {
     }
 
     pub fn headers(&self) -> Vec<&HttpHeader> {
-        self.headers.iter().map(|h| h).collect()
+        self.headers.iter().collect()
     }
     pub fn into_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
@@ -289,12 +283,13 @@ impl Display for HttpResponse {
         write!(f, "{}", String::from_utf8_lossy(&self.body))
     }
 }
+
 pub struct HttpParser {
     inner: ByteBuffer,
 }
 
 impl HttpParser {
-    pub fn new<'a>(buffer: &'a [u8]) -> Self {
+    pub fn new(buffer: &[u8]) -> Self {
         Self {
             inner: ByteBuffer::new(buffer),
         }
@@ -321,7 +316,7 @@ impl HttpParser {
     }
 
     fn parse_version(version: &[u8]) -> Result<HttpVersion, Error> {
-        match version.trim_ascii() {
+        match version {
             b"HTTP/1.1" => Ok(HttpVersion::Http1),
             b"HTTP/2" => Ok(HttpVersion::Http2),
             b"HTTP/3" => Ok(HttpVersion::Http3),
@@ -335,12 +330,6 @@ impl HttpParser {
         }
     }
 
-    fn parse_url(url: &[u8]) -> Url {
-        let url_string = String::from_utf8_lossy(url);
-        Url {
-            inner: url_string.trim().to_string(),
-        }
-    }
     fn parse_status_code(status_code: &[u8]) -> Result<usize, Error> {
         let code_string = String::from_utf8_lossy(status_code);
         match code_string.trim().parse::<usize>() {
@@ -355,29 +344,35 @@ impl HttpParser {
         }
     }
 
-    fn parse_headers(&mut self) -> Vec<HttpHeader> {
+    fn parse_headers(&mut self) -> std::io::Result<Vec<HttpHeader>> {
         let mut headers = Vec::new();
-        let mut line = String::new();
-        while let Ok(_) = self.inner.read_line(&mut line) {
-            // empty line between request and body, we are done
-            if line.trim().is_empty() {
-                break;
-            } else {
-                if let Some(index) = line.find(':') {
-                    if index < line.len() {
-                        let name = line[0..index].to_string().trim().to_string();
-                        let value = line[index + 1..line.len()]
-                            .trim_ascii_start()
-                            .replace(&['\r', '\n'], "")
-                            .to_string();
-                        headers.push(HttpHeader { name, value });
+           
+        let mut name_buffer = Vec::new();
+        while ! self.inner.is_line_end() {
+            let mut value = String::new();
+            match self.inner.read_until(b':', &mut name_buffer) {
+                Ok(n) => {
+                    if n == 0 {
+                        // no data = done reading
+                        return Ok(headers);
                     }
+                    let name = String::from_utf8_lossy(&name_buffer[0..n-1]).to_string();
+                    self.inner.skip_white_space(); // spaces may occur before header value from standard
+                    self.inner.read_sentence(&mut value);
+                    self.inner.next_line(); // read line ending left over from sentence
+                    headers.push(HttpHeader { name, value });
+                    
                 }
-                line.clear();
+                Err(error) => {
+                    return Err(error);
+                }
             }
+            name_buffer.clear();
         }
-        headers
+        self.inner.next_line();
+        Ok(headers)
     }
+
     fn parse_body(&mut self) -> Result<Vec<u8>, Error> {
         let mut buff = Vec::new();
         match self.inner.read_to_end(&mut buff) {
@@ -386,17 +381,21 @@ impl HttpParser {
         }
     }
     pub fn parse_response(&mut self) -> Result<HttpResponse, Error> {
-        let mut buffer = Vec::new();
-        self.inner.read_until(b' ', &mut buffer)?;
-        let version = Self::parse_version(&buffer)?;
-        buffer.clear();
-        self.inner.read_until(b' ', &mut buffer)?;
-        let status_code = Self::parse_status_code(&buffer)?;
 
-        buffer.clear();
-        self.inner.read_until(b'\n', &mut buffer)?;
-        let status_msg = String::from_utf8_lossy(&buffer).trim().to_string();
-        let headers = self.parse_headers();
+        let mut version = String::new();
+        self.inner.read_word(&mut version);
+        self.inner.skip_white_space();
+        let version = Self::parse_version(version.as_bytes())?;
+        
+        let mut status_code = String::new();
+        self.inner.read_word(&mut status_code);
+        self.inner.skip_white_space();
+        let status_code = Self::parse_status_code(status_code.as_bytes())?;
+
+        let mut status_msg = String::new();
+        self.inner.read_sentence(&mut status_msg);
+        self.inner.next_line();
+        let headers = self.parse_headers()?;
         let body = self.parse_body()?;
         Ok(HttpResponse {
             version,
@@ -407,76 +406,125 @@ impl HttpParser {
         })
     }
     pub fn parse_request(&mut self) -> Result<HttpRequest, Error> {
-        let mut buffer = Vec::new();
-        self.inner.read_until(b' ', &mut buffer)?;
-        let method = Self::parse_method(&buffer)?;
-        buffer.clear();
-        self.inner.read_until(b' ', &mut buffer)?;
-        let url = Self::parse_url(&buffer);
-        buffer.clear();
-        self.inner.read_until(b'\n', &mut buffer)?;
-        let version = Self::parse_version(&buffer)?;
+        let mut method = String::new();
+        self.inner.read_word(&mut method);
+        let method = Self::parse_method(method.as_bytes())?;
+        self.inner.skip_white_space();
 
-        let headers = self.parse_headers();
+        let mut url = String::new();
+        self.inner.read_word(&mut url);
+        self.inner.skip_white_space();
+
+        let mut version = String::new();
+        self.inner.read_word(&mut version);
+        let version = Self::parse_version(version.as_bytes())?;
+        self.inner.next_line();
+
+        let headers = self.parse_headers()?;
         let body = self.parse_body()?;
         Ok(HttpRequest {
             method,
-            url,
+            url: Url{ inner: url},
             version,
             headers,
             body,
         })
     }
 }
+
 pub struct ByteBuffer {
     inner: Vec<u8>,
     index: usize,
 }
 
+
 impl ByteBuffer {
-    pub fn new(buffer: &[u8]) -> Self {
+    pub(crate) fn new(buffer: &[u8]) -> Self {
         Self {
             inner: buffer.to_vec(),
             index: 0,
         }
     }
-    pub fn reset(&mut self) {
-        self.index = 0;
-    }
-}
 
-impl Read for ByteBuffer {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        let buf_len = buf.len();
-        let inner_len = self.inner.len();
+    pub fn skip_white_space(&mut self) {
+        while self.index < self.inner.len() {
+            if !(self.inner[self.index] as char).is_whitespace() {
+                break;
+            }
+            self.index += 1;
+        }
+    }
+    pub(crate) fn read_word(&mut self, buffer: &mut String) -> usize {
+        let mut read = 0;
+        while self.index < self.inner.len() {
+            let current_char = self.inner[self.index] as char;
+            if !current_char.is_whitespace() {
+                buffer.push(self.inner[self.index] as char);
+                read += 1;
+            } else {
+                break;
+            }
+            self.index += 1;
+        }
+        read
+    }
+    pub (crate) fn is_line_end(&self) -> bool {
+        if self.index < self.inner.len() {
+            let current_char = self.inner[self.index];
+            current_char ==  b'\r' || current_char == b'\n' 
+        } else {
+            true
+        }
+        
+    }
+    pub(crate) fn next_line(&mut self) -> bool {
+        while self.index < self.inner.len() {
+            let current_char = self.inner[self.index];
+            if current_char == b'\n'{
+                self.index +=1;
+                return true;
+            }
+            self.index += 1;
+        } 
+        false
+    }
+    pub(crate) fn read_sentence(&mut self, buffer: &mut String) -> usize {
+        let mut read = 0;
+        while self.index < self.inner.len() {
+            if self.inner[self.index] == b'\r' || self.inner[self.index] == b'\n' {
+                break;
+            } else { 
+                buffer.push(self.inner[self.index] as char);
+                read += 1;
+            }
+            self.index += 1;
+        }
+        read
+    }
+    pub(crate) fn read_until(&mut self, byte: u8, buffer: &mut Vec<u8>) -> std::io::Result<usize> {
+        let mut count = 0;
+        while self.index < self.inner.len() {
+            let current_char = self.inner[self.index];
+            buffer.push(current_char);
+            count+=1;
+            self.index += 1;
+            if current_char == byte {
+                break;
+            }
+        }
+          Ok(count)
+    }
+
+    pub (crate) fn read_to_end(&mut self, buffer: &mut Vec<u8>) -> std::io::Result<usize> {
+        let mut count = 0;
         let start = self.index;
-
-        if start + buf_len <= inner_len {
-            buf.copy_from_slice(&self.inner[start..start + buf_len]);
-            self.index += buf_len;
-            Ok(buf_len)
-        } else if start < inner_len {
-            let leftover_count = inner_len - self.index;
-            buf[0..leftover_count].copy_from_slice(&self.inner[start..start + leftover_count]);
-            self.index += leftover_count;
-            Ok(leftover_count)
-        } else {
-            Ok(0) // done reading
+        let end = self.inner.len();
+        if self.index < self.inner.len() {
+            buffer.extend_from_slice(&self.inner[start..end]);
+            count = end - start;
+            self.index = end;
         }
+        Ok(count)
     }
 }
-impl BufRead for ByteBuffer {
-    fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
-        if self.inner.len() > self.index {
-            Ok(&self.inner[self.index..])
-        } else {
-            Ok(&[])
-        }
-    }
 
-    fn consume(&mut self, amt: usize) {
-        if self.index + amt <= self.inner.len() {
-            self.index += amt;
-        }
-    }
-}
