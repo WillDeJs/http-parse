@@ -1,4 +1,4 @@
-use crate::{HttpHeader, HttpMethod, HttpVersion};
+use crate::{parser::ByteBuffer, HttpHeader, HttpMethod, HttpVersion};
 
 #[test]
 fn test_response() {
@@ -10,9 +10,9 @@ Content-Length: 1234\r
 \r
 <!doctype html>
 <!-- HTML content follows -->";
-
-    let mut parser = crate::HttpParser::new(response.as_bytes());
-    let response = parser.parse_response().unwrap();
+    let reader = ByteBuffer::new(response.as_bytes());
+    let mut parser = crate::HttpParser::from_reader(reader);
+    let response = parser.read_response().unwrap();
     assert_eq!(response.version(), HttpVersion::Http1);
     assert_eq!(response.status_code(), 200);
     assert_eq!(response.status_msg(), "OK".to_string());
@@ -36,8 +36,9 @@ Content-Length: 1234\r
 \r
 <!doctype html><!-- HTML content follows -->";
 
-    let mut parser = crate::HttpParser::new(response_text.as_bytes());
-    let response = parser.parse_response().unwrap();
+    let reader = ByteBuffer::new(response_text.as_bytes());
+    let mut parser = crate::HttpParser::from_reader(reader);
+    let response = parser.read_response().unwrap();
     assert_eq!(response_text.as_bytes(), &response.into_bytes());
 }
 
@@ -47,7 +48,10 @@ fn test_request() {
 Host: developer.mozilla.org\r
 Accept-Language: fr\r\n";
 
-    let request = crate::HttpRequest::from_bytes(request.as_bytes()).unwrap();
+    let reader = ByteBuffer::new(request.as_bytes());
+    let mut parser = crate::HttpParser::from_reader(reader);
+    let request = parser.read_request().unwrap();
+
     assert_eq!(request.version(), HttpVersion::Http1);
     assert_eq!(request.method(), HttpMethod::Get);
     let my_header = HttpHeader {
@@ -60,6 +64,8 @@ Accept-Language: fr\r\n";
 fn test_request_bytes() {
     let request_text = "GET / HTTP/1.1\r\nHost: developer.mozilla.org\r\nAccept-Language: fr\r\n";
 
-    let request = crate::HttpRequest::from_bytes(request_text.as_bytes()).unwrap();
+    let reader = ByteBuffer::new(request_text.as_bytes());
+    let mut parser = crate::HttpParser::from_reader(reader);
+    let request = parser.read_request().unwrap();
     assert_eq!(&request.into_bytes(), request_text.as_bytes());
 }
