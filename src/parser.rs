@@ -1,4 +1,4 @@
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, ErrorKind, Read};
 
 use crate::{
     HttpHeader, HttpMethod, HttpRequest, HttpResponse, HttpVersion, Url, H_CONTENT_LENGTH,
@@ -17,7 +17,7 @@ impl<'a, R: Read> HttpParser<'a, R> {
     }
 
     pub fn read_response(&mut self) -> std::io::Result<HttpResponse> {
-        let mut buffer = Vec::new();
+        let mut buffer = Vec::with_capacity(100);
 
         let _ = self.reader.read_until(b' ', &mut buffer)?;
         let version = Self::parse_version(&buffer)?;
@@ -31,7 +31,9 @@ impl<'a, R: Read> HttpParser<'a, R> {
         let message = String::from_utf8_lossy(&buffer).trim().to_owned();
         buffer.clear();
 
-        let headers = self.parse_headers();
+        // let headers = self.parse_headers();
+        let mut headers = Vec::new();
+        self.parse_headers_two(&mut headers)?;
         let body = Vec::new();
         let chunks = Vec::new();
         let mut response = HttpResponse {
@@ -57,7 +59,7 @@ impl<'a, R: Read> HttpParser<'a, R> {
         Ok(response)
     }
     pub fn read_request(&mut self) -> std::io::Result<HttpRequest> {
-        let mut buffer = Vec::new();
+        let mut buffer = Vec::with_capacity(100);
         let _ = self.reader.read_until(b' ', &mut buffer)?;
         let method = Self::parse_method(&buffer)?;
         buffer.clear();
@@ -70,7 +72,10 @@ impl<'a, R: Read> HttpParser<'a, R> {
         let _ = self.reader.read_until(b'\n', &mut buffer)?;
 
         let version = Self::parse_version(&buffer)?;
-        let headers = self.parse_headers();
+        // let headers = self.parse_headers();
+        let mut headers = Vec::new();
+        self.parse_headers_two(&mut headers)?;
+
         let body = Vec::new();
         let chunks = Vec::new();
 
@@ -222,7 +227,7 @@ impl<'a, R: Read> HttpParser<'a, R> {
     }
 
     fn parse_headers(&mut self) -> Vec<HttpHeader> {
-        let mut headers = Vec::new();
+        let mut headers = Vec::with_capacity(100);
         let mut line = String::new();
         while self.reader.read_line(&mut line).is_ok() {
             // empty line between request and body, we are done
@@ -243,6 +248,70 @@ impl<'a, R: Read> HttpParser<'a, R> {
             }
         }
         headers
+    }
+
+    fn parse_headers_two(&mut self, headers: &mut Vec<HttpHeader>) -> std::io::Result<()> {
+        while !self.is_line_end()? {
+            let mut name = Vec::new();
+            let mut value = Vec::new();
+            let name_len = self.reader.read_until(b':', &mut name)?;
+            self.skip_matching(|byte| (byte as char).is_whitespace())?;
+            let value_len = self.reader.read_until(b'\n', &mut value)?;
+            headers.push(HttpHeader::new(
+                String::from_utf8_lossy(&name[0..name_len - 1]),
+                String::from_utf8_lossy(&value[0..value_len - 2]),
+            ));
+        }
+        self.skip_next_line();
+        Ok(())
+    }
+
+    fn skip_matching<F>(&mut self, f: F) -> std::io::Result<usize>
+    where
+        F: Fn(u8) -> bool,
+    {
+        let mut read = 0;
+        loop {
+            let (done, used) = {
+                let available = match self.reader.fill_buf() {
+                    Ok(n) => n,
+                    Err(ref e) if e.kind() == ErrorKind::Interrupted => continue,
+                    Err(e) => return Err(e),
+                };
+                match available.iter().position(|byte| !f(*byte)) {
+                    Some(index) => (true, index),
+                    None => (false, 0),
+                }
+            };
+            self.reader.consume(used);
+            read += used;
+            if done || used == 0 {
+                return Ok(read);
+            }
+        }
+    }
+
+    fn is_line_end(&mut self) -> std::io::Result<bool> {
+        if self.reader.buffer().len() >= 2 {
+            Ok(self.reader.buffer().starts_with(b"\r\n"))
+        } else {
+            loop {
+                match self.reader.fill_buf() {
+                    Ok(available) => {
+                        return Ok(available.is_empty() || available.starts_with(b"\r\n"))
+                    }
+                    Err(ref e) if e.kind() == ErrorKind::Interrupted => continue,
+                    Err(e) => return Err(e),
+                };
+            }
+        }
+    }
+
+    fn skip_next_line(&mut self) -> std::io::Result<()> {
+        if self.is_line_end()? {
+            self.reader.consume(2);
+        }
+        Ok(())
     }
 }
 
