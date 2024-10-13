@@ -1,5 +1,6 @@
 use std::{fmt::Display, str::FromStr};
 
+use crate::{H_CONTENT_LENGTH, H_TRANSFER_ENCODING};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum HttpMethod {
@@ -30,17 +31,27 @@ impl Display for HttpMethod {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct HttpHeader {
-    pub name: String,
-    pub value: String,
+    pub(crate) name: String,
+    pub(crate) value: String,
 }
 
 impl HttpHeader {
+    pub fn new<T, V>(name: T, value: V) -> Self
+    where
+        V: Display,
+        T: Display,
+    {
+        HttpHeader {
+            name: name.to_string(),
+            value: value.to_string(),
+        }
+    }
     pub fn name(&self) -> &String {
         &self.name
     }
-    pub fn value<T : FromStr>(&self) -> Result<T, T::Err> {
+    pub fn value<T: FromStr>(&self) -> Result<T, T::Err> {
         self.value.parse::<T>()
     }
 }
@@ -81,6 +92,8 @@ pub struct HttpRequest {
     pub(crate) version: HttpVersion,
     pub(crate) headers: Vec<HttpHeader>,
     pub(crate) body: Vec<u8>,
+    pub(crate) chunks: Vec<(usize, usize)>,
+    pub(crate) chunked: bool,
 }
 
 impl Default for HttpRequest {
@@ -99,6 +112,8 @@ impl HttpRequest {
             url: Url {
                 inner: "\\".to_string(),
             },
+            chunks: Vec::new(),
+            chunked: false,
         }
     }
 
@@ -112,6 +127,12 @@ impl HttpRequest {
     }
     pub fn add_data(&mut self, data: &[u8]) {
         self.body.extend_from_slice(data);
+        if self.chunked {
+            self.chunks.push((self.body.len(), data.len()));
+            self.put_header(H_TRANSFER_ENCODING, "chunked");
+        } else {
+            self.put_header(H_CONTENT_LENGTH, self.body.len());
+        }
     }
     pub fn data(&self) -> &Vec<u8> {
         &self.body
@@ -122,22 +143,31 @@ impl HttpRequest {
     pub fn headers(&self) -> Vec<&HttpHeader> {
         self.headers.iter().collect()
     }
-    pub fn header(&self, name: &str) -> Option<&HttpHeader> {
-        self.headers
-            .iter()
-            .find(|header| header.name.to_lowercase().eq(&name.to_lowercase()))
+    pub fn header<T>(&self, name: T) -> Option<&HttpHeader>
+    where
+        T: AsRef<str>,
+    {
+        self.headers.iter().find(|header| {
+            header
+                .name
+                .to_lowercase()
+                .eq(&name.as_ref().to_lowercase().to_string())
+        })
     }
-    pub fn put_header(&mut self, name: &str, value: &str) {
+    pub fn put_header<T>(&mut self, name: &str, value: T)
+    where
+        T: Display,
+    {
         if let Some(index) = self
             .headers
             .iter()
             .position(|header| header.name.to_lowercase().eq(&name.to_lowercase()))
         {
-            self.headers[index].value = value.to_string();
+            self.headers[index].value = format!("{}", value);
         } else {
             self.headers.push(HttpHeader {
                 name: name.to_string(),
-                value: value.to_string(),
+                value: format!("{}", value),
             });
         }
     }
@@ -165,7 +195,18 @@ impl HttpRequest {
         if !self.body.is_empty() {
             bytes.push(b'\r');
             bytes.push(b'\n');
-            bytes.extend_from_slice(&self.body);
+            if self.chunked {
+                for (start, end) in &self.chunks {
+                    let count = end - start;
+                    bytes.extend_from_slice(format!("{:X}\r\n", count).as_bytes());
+                    bytes.extend_from_slice(&self.body[*start..*end]);
+
+                    bytes.push(b'\r');
+                    bytes.push(b'\n');
+                }
+            } else {
+                bytes.extend_from_slice(&self.body);
+            }
         }
         bytes
     }
@@ -178,7 +219,24 @@ impl Display for HttpRequest {
             let _ = write!(f, "{}\r\n", header);
         });
         write!(f, "\r\n")?;
-        write!(f, "{}", String::from_utf8_lossy(&self.body))
+        if self.chunked {
+            for (start, end) in &self.chunks {
+                let count = end - start;
+                write!(f, "{:X}\r\n", count)?;
+                write!(
+                    f,
+                    "{}\r\n",
+                    String::from_utf8_lossy(&self.body[*start..*end])
+                )?;
+
+                if count == 0 {
+                    write!(f, "\r\n\r\n")?;
+                }
+            }
+            Ok(())
+        } else {
+            write!(f, "{}", String::from_utf8_lossy(&self.body))
+        }
     }
 }
 
@@ -189,6 +247,8 @@ pub struct HttpResponse {
     pub(crate) status_msg: String,
     pub(crate) headers: Vec<HttpHeader>,
     pub(crate) body: Vec<u8>,
+    pub(crate) chunks: Vec<(usize, usize)>,
+    pub(crate) chunked: bool,
 }
 
 impl Default for HttpResponse {
@@ -205,17 +265,30 @@ impl HttpResponse {
             status_msg: "Ok".to_string(),
             headers: Vec::new(),
             body: Vec::new(),
+            chunks: Vec::new(),
+            chunked: false,
         }
     }
     pub fn with_status_code(mut self, code: usize) -> Self {
         self.status_code = code;
         self
     }
-    pub fn with_version(&mut self, version: HttpVersion) {
+    pub fn with_version(mut self, version: HttpVersion) -> Self {
         self.version = version;
+        self
+    }
+    pub fn with_status_msg(mut self, msg: &str) -> Self {
+        self.status_msg = msg.to_owned();
+        self
     }
     pub fn add_data(&mut self, data: &[u8]) {
         self.body.extend_from_slice(data);
+        if self.chunked {
+            self.chunks.push((self.body.len(), data.len()));
+            self.put_header(H_TRANSFER_ENCODING, "chunked");
+        } else {
+            self.put_header(H_CONTENT_LENGTH, self.body.len());
+        }
     }
     pub fn data(&self) -> &Vec<u8> {
         &self.body
@@ -234,21 +307,23 @@ impl HttpResponse {
             .iter()
             .find(|header| header.name.to_lowercase().eq(&name.to_lowercase()))
     }
-    pub fn put_header(&mut self, name: &str, value: &str) {
+    pub fn put_header<T>(&mut self, name: &str, value: T)
+    where
+        T: Display,
+    {
         if let Some(index) = self
             .headers
             .iter()
             .position(|header| header.name.to_lowercase().eq(&name.to_lowercase()))
         {
-            self.headers[index].value = value.to_string();
+            self.headers[index].value = format!("{}", value);
         } else {
             self.headers.push(HttpHeader {
                 name: name.to_string(),
-                value: value.to_string(),
+                value: format!("{}", value),
             });
         }
     }
-
     pub fn headers(&self) -> Vec<&HttpHeader> {
         self.headers.iter().collect()
     }
@@ -273,7 +348,18 @@ impl HttpResponse {
         if !self.body.is_empty() {
             bytes.push(b'\r');
             bytes.push(b'\n');
-            bytes.extend_from_slice(&self.body);
+            if self.chunked {
+                for (start, end) in &self.chunks {
+                    let count = end - start;
+                    bytes.extend_from_slice(format!("{:X}\r\n", count).as_bytes());
+                    bytes.extend_from_slice(&self.body[*start..*end]);
+
+                    bytes.push(b'\r');
+                    bytes.push(b'\n');
+                }
+            } else {
+                bytes.extend_from_slice(&self.body);
+            }
         }
         bytes
     }
@@ -290,7 +376,24 @@ impl Display for HttpResponse {
             let _ = write!(f, "{}\r\n", header);
         });
         write!(f, "\r\n")?;
-        write!(f, "{}", String::from_utf8_lossy(&self.body))
+
+        if self.chunked {
+            for (start, end) in &self.chunks {
+                let count = end - start;
+                write!(f, "{:X}\r\n", count)?;
+                write!(
+                    f,
+                    "{}\r\n",
+                    String::from_utf8_lossy(&self.body[*start..*end])
+                )?;
+
+                if count == 0 {
+                    write!(f, "\r\n")?;
+                }
+            }
+            Ok(())
+        } else {
+            write!(f, "{}", String::from_utf8_lossy(&self.body))
+        }
     }
 }
-

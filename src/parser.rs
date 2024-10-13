@@ -1,18 +1,61 @@
 use std::io::{BufRead, BufReader, Read};
 
-use crate::{HttpHeader, HttpMethod, HttpRequest, HttpResponse, HttpVersion, Url};
+use crate::{
+    HttpHeader, HttpMethod, HttpRequest, HttpResponse, HttpVersion, Url, H_CONTENT_LENGTH,
+    H_TRANSFER_ENCODING,
+};
 
-pub struct HttpParser<R> {
-    reader: BufReader<R>,
+pub struct HttpParser<'a, R> {
+    reader: BufReader<&'a mut R>,
 }
 
-impl<R: Read> HttpParser<R> {
-    pub fn from_reader(reader: R) -> Self {
+impl<'a, R: Read> HttpParser<'a, R> {
+    pub fn from_reader(reader: &'a mut R) -> Self {
         Self {
             reader: BufReader::new(reader),
         }
     }
 
+    pub fn read_response(&mut self) -> std::io::Result<HttpResponse> {
+        let mut buffer = Vec::new();
+
+        let _ = self.reader.read_until(b' ', &mut buffer)?;
+        let version = Self::parse_version(&buffer)?;
+        buffer.clear();
+
+        let _ = self.reader.read_until(b' ', &mut buffer)?;
+        let status_code = Self::parse_status_code(&buffer)?;
+        buffer.clear();
+
+        let _ = self.reader.read_until(b'\n', &mut buffer)?;
+        let message = String::from_utf8_lossy(&buffer).trim().to_owned();
+        buffer.clear();
+
+        let headers = self.parse_headers();
+        let body = Vec::new();
+        let chunks = Vec::new();
+        let mut response = HttpResponse {
+            version,
+            status_code,
+            status_msg: message,
+            headers,
+            body,
+            chunks,
+            chunked: false,
+        };
+        let encoding_header = response.header(H_TRANSFER_ENCODING).cloned();
+        let content_header = response.header(H_CONTENT_LENGTH).cloned();
+
+        self.extract_body_data(
+            encoding_header,
+            content_header,
+            &mut response.chunks,
+            &mut response.body,
+        )?;
+
+        response.chunked = !response.chunks.is_empty();
+        Ok(response)
+    }
     pub fn read_request(&mut self) -> std::io::Result<HttpRequest> {
         let mut buffer = Vec::new();
         let _ = self.reader.read_until(b' ', &mut buffer)?;
@@ -28,91 +71,105 @@ impl<R: Read> HttpParser<R> {
 
         let version = Self::parse_version(&buffer)?;
         let headers = self.parse_headers();
+        let body = Vec::new();
+        let chunks = Vec::new();
 
-        if let Some(content_length) = headers
-            .iter()
-            .find(|head| head.name.to_lowercase().eq("content-length"))
-        {
-            // Enforce reading the contents based on a Content-Type
-            let size = content_length.value.parse::<usize>().map_err(|_| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("Invalid Content-Value:{} set.", content_length.value).as_str(),
-                )
-            })?;
-            let mut body = vec![0;size];
-            let size = self.reader.read(&mut body)?;
-            body.truncate(size);
-            Ok(HttpRequest {
-                method,
-                url: Url { inner: url },
-                version,
-                headers,
-                body,
-            })
-        } else {
-            // We don't have content length, read until server closes connection
-            let mut body = Vec::new();
-            self.reader.read_to_end(&mut body)?;
-            Ok(HttpRequest {
-                method,
-                url: Url { inner: url },
-                version,
-                headers,
-                body,
-            })
-        }
+        let mut request = HttpRequest {
+            method,
+            url: Url { inner: url },
+            version,
+            headers,
+            body,
+            chunked: false,
+            chunks,
+        };
+        let encoding_header = request.header(H_TRANSFER_ENCODING).cloned();
+        let content_header = request.header(H_CONTENT_LENGTH).cloned();
+
+        self.extract_body_data(
+            encoding_header,
+            content_header,
+            &mut request.chunks,
+            &mut request.body,
+        )?;
+
+        request.chunked = !request.chunks.is_empty();
+        Ok(request)
     }
 
-    pub fn read_response(&mut self) -> std::io::Result<HttpResponse> {
-        let mut buffer = Vec::new();
-
-        let _ = self.reader.read_until(b' ', &mut buffer)?;
-        let version = Self::parse_version(&buffer)?;
-        buffer.clear();
-
-        let _ = self.reader.read_until(b' ', &mut buffer)?;
-        let status_code = Self::parse_status_code(&buffer)?;
-        buffer.clear();
-        
-        let _ = self.reader.read_until(b'\n', &mut buffer)?;
-        let message = String::from_utf8_lossy(&buffer).trim().to_owned();
-        buffer.clear();
-        
-        let headers = self.parse_headers();
-        if let Some(content_length) = headers
-            .iter()
-            .find(|head| head.name.to_lowercase().eq("content-length"))
-        {
-            // Enforce reading the contents based on a Content-Type
-            let size = content_length.value.parse::<usize>().map_err(|_| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("Invalid Content-Value:{} set.", content_length.value).as_str(),
-                )
-            })?;
-            let mut body = vec![0;size];
-            let size = self.reader.read(&mut body)?;
-            body.truncate(size);
-            Ok(HttpResponse {
-                version,
-                status_code,
-                status_msg: message,
-                headers,
-                body,
-            })
-        } else {
-            // We don't have content length, read until server closes connection
-            let mut body = Vec::new();
-            let _ = self.reader.read_to_end(&mut body)?;
-            Ok(HttpResponse {
-                version,
-                status_code,
-                status_msg: message,
-                headers,
-                body,
-            })
+    fn extract_body_data(
+        &mut self,
+        encoding_header: Option<HttpHeader>,
+        content_header: Option<HttpHeader>,
+        chunks: &mut Vec<(usize, usize)>,
+        body: &mut Vec<u8>,
+    ) -> Result<(), std::io::Error> {
+        let mut chunked = false;
+        encoding_header.inspect(|h| {
+            if h.value.ne("identity") {
+                chunked = true;
+            }
+        });
+        if chunked {
+            self.read_chunked_body(body, chunks)?;
+        } else if let Some(header) = content_header {
+            match header.value::<usize>() {
+                Ok(length) => {
+                    body.resize_with(length, || 0);
+                    self.reader.read_exact(body)?;
+                }
+                Err(_e) => {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("Ivalid header `{}`", header).as_str(),
+                    ))?;
+                }
+            };
         }
+
+        Ok(())
+    }
+
+    fn read_chunked_body(
+        &mut self,
+        body: &mut Vec<u8>,
+        chunks: &mut Vec<(usize, usize)>,
+    ) -> Result<(), std::io::Error> {
+        let mut buff = Vec::with_capacity(16);
+        while let Ok(n) = self.reader.read_until(b'\n', &mut buff) {
+            // done reading
+            if n == 0 {
+                buff.clear();
+                // done reading
+                break;
+            }
+
+            // parse hex byte numbers contained in chunk
+            let digits_str = String::from_utf8_lossy(buff.trim_ascii()).to_string();
+            match usize::from_str_radix(&digits_str, 16) {
+                Ok(chunk_size) => {
+                    if chunk_size == 0 {
+                        let _ = self.reader.read_until(b'\n', &mut buff);
+                        break;
+                    } else {
+                        let mut chunk_buff = vec![0; chunk_size];
+                        self.reader.read_exact(&mut chunk_buff)?;
+
+                        chunks.push((body.len(), body.len() + chunk_buff.len()));
+                        body.extend_from_slice(&chunk_buff);
+                    }
+                }
+                Err(_) => break, // invalid reading of body for now just exit loop
+            }
+            // ignore new line after chunk
+            let _ = self.reader.read_until(b'\n', &mut buff);
+            buff.clear();
+        }
+        // last chunk 0 data
+        if !chunks.is_empty() {
+            chunks.push((0, 0));
+        }
+        Ok(())
     }
 
     fn parse_method(method: &[u8]) -> std::io::Result<HttpMethod> {
@@ -138,13 +195,13 @@ impl<R: Read> HttpParser<R> {
     fn parse_version(version: &[u8]) -> std::io::Result<HttpVersion> {
         match version.trim_ascii() {
             b"HTTP/1.1" => Ok(HttpVersion::Http1),
-            b"HTTP/2" => Ok(HttpVersion::Http2),
-            b"HTTP/3" => Ok(HttpVersion::Http3),
+            // b"HTTP/2" => Ok(HttpVersion::Http2),
+            // b"HTTP/3" => Ok(HttpVersion::Http3),
             _ => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!(
-                    "Invalid HTTP version in buffer `{}`.",
-                    String::from_utf8_lossy(version)
+                    "Unsuported HTTP version in buffer `{}`.",
+                    String::from_utf8_lossy(version.trim_ascii())
                 ),
             )),
         }

@@ -1,4 +1,4 @@
-use crate::{parser::ByteBuffer, HttpHeader, HttpMethod, HttpVersion};
+use crate::{parser::ByteBuffer, HttpHeader, HttpMethod, HttpVersion, H_TRANSFER_ENCODING};
 
 #[test]
 fn test_response() {
@@ -6,12 +6,12 @@ fn test_response() {
 Content-Type: text/html; charset=UTF-8\r
 Date: Fri, 21 Jun 2024 14:18:33 GMT\r
 Last-Modified: Thu, 17 Oct 2019 07:18:26 GMT\r
-Content-Length: 1234\r
+Content-Length: 45\r
 \r
 <!doctype html>
 <!-- HTML content follows -->";
-    let reader = ByteBuffer::new(response.as_bytes());
-    let mut parser = crate::HttpParser::from_reader(reader);
+    let mut reader = ByteBuffer::new(response.as_bytes());
+    let mut parser = crate::HttpParser::from_reader(&mut reader);
     let response = parser.read_response().unwrap();
     assert_eq!(response.version(), HttpVersion::Http1);
     assert_eq!(response.status_code(), 200);
@@ -23,7 +23,7 @@ Content-Length: 1234\r
         name: "date".to_string(),
         value: date.to_string(),
     };
-    assert_eq!(String::from_utf8_lossy(response.data()), data.to_string());
+    assert_eq!(response.data(), data.as_bytes());
     assert_eq!(Some(&my_header), response.header("date"));
 }
 #[test]
@@ -32,12 +32,12 @@ fn test_response_bytes() {
 Content-Type: text/html; charset=UTF-8\r
 Date: Fri, 21 Jun 2024 14:18:33 GMT\r
 Last-Modified: Thu, 17 Oct 2019 07:18:26 GMT\r
-Content-Length: 1234\r
+Content-Length: 44\r
 \r
 <!doctype html><!-- HTML content follows -->";
 
-    let reader = ByteBuffer::new(response_text.as_bytes());
-    let mut parser = crate::HttpParser::from_reader(reader);
+    let mut reader = ByteBuffer::new(response_text.as_bytes());
+    let mut parser = crate::HttpParser::from_reader(&mut reader);
     let response = parser.read_response().unwrap();
     assert_eq!(response_text.as_bytes(), &response.into_bytes());
 }
@@ -48,8 +48,8 @@ fn test_request() {
 Host: developer.mozilla.org\r
 Accept-Language: fr\r\n";
 
-    let reader = ByteBuffer::new(request.as_bytes());
-    let mut parser = crate::HttpParser::from_reader(reader);
+    let mut reader = ByteBuffer::new(request.as_bytes());
+    let mut parser = crate::HttpParser::from_reader(&mut reader);
     let request = parser.read_request().unwrap();
 
     assert_eq!(request.version(), HttpVersion::Http1);
@@ -64,8 +64,25 @@ Accept-Language: fr\r\n";
 fn test_request_bytes() {
     let request_text = "GET / HTTP/1.1\r\nHost: developer.mozilla.org\r\nAccept-Language: fr\r\n";
 
-    let reader = ByteBuffer::new(request_text.as_bytes());
-    let mut parser = crate::HttpParser::from_reader(reader);
+    let mut reader = ByteBuffer::new(request_text.as_bytes());
+    let mut parser = crate::HttpParser::from_reader(&mut reader);
     let request = parser.read_request().unwrap();
     assert_eq!(&request.into_bytes(), request_text.as_bytes());
+}
+
+#[test]
+fn test_response_body_chuncked() {
+    let response_text="HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nTransfer-Encoding: chunked\r\n\r\n7\r\nMozilla\r\n11\r\nDeveloper Network\r\n0\r\n\r\n";
+
+    let mut reader = ByteBuffer::new(response_text.as_bytes());
+    let mut parser = crate::HttpParser::from_reader(&mut reader);
+    let response = parser.read_response().unwrap();
+    let transfer_header = HttpHeader {
+        name: "Transfer-Encoding".to_string(),
+        value: "chunked".to_string(),
+    };
+
+    assert_eq!(Some(&transfer_header), response.header(H_TRANSFER_ENCODING));
+    assert_eq!(response.data(), b"MozillaDeveloper Network");
+    assert_eq!(response.into_bytes(), response_text.as_bytes());
 }
