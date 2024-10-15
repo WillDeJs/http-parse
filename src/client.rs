@@ -1,13 +1,6 @@
-use std::{
-    fs,
-    io::Write,
-    net::{TcpListener, TcpStream},
-    sync::Arc,
-};
+use std::{fs, io::Write, net::TcpStream};
 
-use http_parse::{
-    HttpParser, HttpRequest, HttpResponse, H_ACCEPT_RANGES, H_CONNECTION, H_HOST, H_USER_AGENT,
-};
+use http_parse::{HttpParser, HttpRequest, H_ACCEPT_RANGES, H_CONNECTION, H_HOST, H_USER_AGENT};
 
 pub struct Client;
 
