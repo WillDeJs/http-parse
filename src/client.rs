@@ -11,7 +11,7 @@ impl Client {
         request.put_header(H_ACCEPT_RANGES, "bytes");
         request.put_header(H_CONNECTION, "close");
         request.put_header(H_HOST, "192.168.1.8");
-        request.put_header(H_USER_AGENT, "Mozzila/5.0 (WD test)");
+        request.put_header(H_USER_AGENT, "Mozilla/5.0 (WD test)");
         client.write_all(&request.into_bytes())?;
         println!("== SENDING == \n{}", request);
 
