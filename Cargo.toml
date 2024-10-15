@@ -8,3 +8,11 @@ edition = "2021"
 
 [profile.release]
 debug = true
+
+[[example]]
+name="server"
+path="src/server.rs"
+
+[[example]]
+name="client"
+path="src/client.rs"

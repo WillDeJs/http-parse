@@ -125,6 +125,12 @@ impl HttpRequest {
         self.version = version;
         self
     }
+    pub fn with_url(mut self, url: &str) -> Self {
+        self.url = Url {
+            inner: url.to_owned(),
+        };
+        self
+    }
     pub fn add_data(&mut self, data: &[u8]) {
         self.body.extend_from_slice(data);
         if self.chunked {
@@ -190,11 +196,11 @@ impl HttpRequest {
         for header in self.headers() {
             bytes.extend_from_slice(&format!("{}\r\n", header).into_bytes());
         }
+        bytes.push(b'\r');
+        bytes.push(b'\n');
 
         // next the body
         if !self.body.is_empty() {
-            bytes.push(b'\r');
-            bytes.push(b'\n');
             if self.chunked {
                 for (start, end) in &self.chunks {
                     let count = end - start;
@@ -343,11 +349,11 @@ impl HttpResponse {
         for header in self.headers() {
             bytes.extend_from_slice(&format!("{}\r\n", header).into_bytes());
         }
+        bytes.push(b'\r');
+        bytes.push(b'\n');
 
         // next the body
         if !self.body.is_empty() {
-            bytes.push(b'\r');
-            bytes.push(b'\n');
             if self.chunked {
                 for (start, end) in &self.chunks {
                     let count = end - start;

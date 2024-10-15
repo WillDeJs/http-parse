@@ -18,7 +18,6 @@ impl<'a, R: Read> HttpParser<'a, R> {
 
     pub fn read_response(&mut self) -> std::io::Result<HttpResponse> {
         let mut buffer = Vec::with_capacity(100);
-
         let _ = self.reader.read_until(b' ', &mut buffer)?;
         let version = Self::parse_version(&buffer)?;
         buffer.clear();
@@ -111,7 +110,7 @@ impl<'a, R: Read> HttpParser<'a, R> {
     ) -> Result<(), std::io::Error> {
         let mut chunked = false;
         encoding_header.inspect(|h| {
-            if h.value.ne("identity") {
+            if h.value.contains("identity") {
                 chunked = true;
             }
         });
