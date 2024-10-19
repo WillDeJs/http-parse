@@ -1,8 +1,8 @@
 use std::{io::Write, net::TcpStream};
 
 use http_parse::{
-    HttpMethod, HttpParser, HttpRequest, H_CONTENT_LENGTH, H_CONTENT_RANGE, H_HOST, H_RANGE,
-    S_PARTIAL_CONTENT,
+    HttpMethod, HttpParser, HttpRequestBuilder, H_CONTENT_LENGTH, H_CONTENT_RANGE,
+    H_HOST, H_RANGE, S_PARTIAL_CONTENT,
 };
 
 const MAX_CHUNK_SIZE: usize = 1_000_000; // 1 MB
@@ -11,10 +11,11 @@ pub struct Client;
 impl Client {
     fn get_file_size(host: &str, req: &str) -> std::io::Result<usize> {
         let mut client = TcpStream::connect(host)?;
-        let mut request = HttpRequest::new()
-            .with_method(HttpMethod::Head)
-            .with_url(req);
-        request.put_header(H_HOST, "192.168.1.8");
+        let request = HttpRequestBuilder::new()
+            .method(HttpMethod::Head)
+            .url(req)
+            .header(H_HOST, "192.168.1.8")
+            .build();
 
         client.write_all(&request.into_bytes())?;
         let mut parser = HttpParser::from_reader(&mut client);
@@ -28,10 +29,11 @@ impl Client {
     }
     fn one_shot_download(host: &str, req: &str) -> std::io::Result<()> {
         let mut client = TcpStream::connect(host)?;
-        let mut request = HttpRequest::new()
-            .with_method(HttpMethod::Head)
-            .with_url(req);
-        request.put_header(H_HOST, "192.168.1.8");
+        let request = HttpRequestBuilder::new()
+            .method(HttpMethod::Head)
+            .url(req)
+            .header(H_HOST, "192.168.1.8")
+            .build();
         client.write_all(&request.into_bytes())?;
         let response = HttpParser::from_reader(&mut client).response()?;
         let mut out_file = std::fs::File::create(format!("./{req}"))?;
@@ -45,10 +47,12 @@ impl Client {
         let mut out_file = std::fs::File::create(format!("./{req}"))?;
         let mut total_written = 0;
 
-        let mut request = HttpRequest::new().with_url(req);
-        request.put_header(H_HOST, "192.168.1.8");
         let range_value = format!("bytes={}-{}", start_byte_index, chunk_size);
-        request.put_header(H_RANGE, range_value);
+        let mut request = HttpRequestBuilder::new()
+            .url(req)
+            .header(H_HOST, "192.168.1.8")
+            .header(H_RANGE, range_value)
+            .build();
         loop {
             let mut client = TcpStream::connect(host)?;
             client.write_all(&request.into_bytes())?;

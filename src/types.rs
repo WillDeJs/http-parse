@@ -1,6 +1,6 @@
 use std::{fmt::Display, str::FromStr};
 
-use crate::{H_CONTENT_LENGTH, H_TRANSFER_ENCODING};
+use crate::{StatusCode, H_CONTENT_LENGTH, H_TRANSFER_ENCODING};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum HttpMethod {
@@ -81,6 +81,7 @@ impl Display for HttpVersion {
         }
     }
 }
+
 #[derive(PartialEq)]
 pub struct Url {
     pub(crate) inner: String,
@@ -117,20 +118,6 @@ impl HttpRequest {
         }
     }
 
-    pub fn with_method(mut self, method: HttpMethod) -> Self {
-        self.method = method;
-        self
-    }
-    pub fn with_version(mut self, version: HttpVersion) -> Self {
-        self.version = version;
-        self
-    }
-    pub fn with_url(mut self, url: &str) -> Self {
-        self.url = Url {
-            inner: url.to_owned(),
-        };
-        self
-    }
     pub fn add_data(&mut self, data: &[u8]) {
         self.body.extend_from_slice(data);
         if self.chunked {
@@ -279,18 +266,7 @@ impl HttpResponse {
             chunked: false,
         }
     }
-    pub fn with_status_code(mut self, code: usize) -> Self {
-        self.status_code = code;
-        self
-    }
-    pub fn with_version(mut self, version: HttpVersion) -> Self {
-        self.version = version;
-        self
-    }
-    pub fn with_status_msg(mut self, msg: &str) -> Self {
-        self.status_msg = msg.to_owned();
-        self
-    }
+
     pub fn add_data(&mut self, data: &[u8]) {
         self.body.extend_from_slice(data);
         if self.chunked {
@@ -404,6 +380,131 @@ impl Display for HttpResponse {
             Ok(())
         } else {
             write!(f, "{}", String::from_utf8_lossy(&self.body))
+        }
+    }
+}
+
+pub struct HttpResponseBuilder {
+    version: Option<HttpVersion>,
+    status_code: Option<StatusCode>,
+    headers: Option<Vec<HttpHeader>>,
+    data: Option<Vec<u8>>,
+    chunks: Option<Vec<(usize, usize)>>,
+}
+
+impl Default for HttpResponseBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl HttpResponseBuilder {
+    pub fn new() -> Self {
+        Self {
+            version: Some(HttpVersion::Http1),
+            status_code: Some(StatusCode::OK),
+            headers: None,
+            data: None,
+            chunks: None,
+        }
+    }
+    pub fn status(mut self, code: StatusCode) -> Self {
+        self.status_code = Some(code);
+        self
+    }
+    pub fn header<T>(mut self, name: &str, value: T) -> Self
+    where
+        T: Display,
+    {
+        let headers = self.headers.get_or_insert(Vec::new());
+        headers.push(HttpHeader::new(name, value));
+        self
+    }
+    pub fn body(mut self, new_data: &[u8]) -> Self {
+        let data = self.data.get_or_insert(Vec::new());
+        data.extend_from_slice(new_data);
+        self
+    }
+    pub fn build(self) -> HttpResponse {
+        let version = self.version.unwrap();
+        let status = self.status_code.unwrap();
+        let body = self.data.unwrap_or_default();
+        let headers = self.headers.unwrap_or_default();
+        HttpResponse {
+            version,
+            status_code: status.0,
+            status_msg: status.1.to_string(),
+            body,
+            headers,
+            chunks: Vec::new(),
+            chunked: false,
+        }
+    }
+}
+
+pub struct HttpRequestBuilder {
+    method: Option<HttpMethod>,
+    url: Option<String>,
+    version: Option<HttpVersion>,
+    headers: Option<Vec<HttpHeader>>,
+    data: Option<Vec<u8>>,
+    chunks: Option<Vec<(usize, usize)>>,
+}
+
+impl Default for HttpRequestBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl HttpRequestBuilder {
+    pub fn new() -> Self {
+        Self {
+            method: Some(HttpMethod::Get),
+            url: Some("/".to_string()),
+            version: Some(HttpVersion::Http1),
+            headers: None,
+            data: None,
+            chunks: None,
+        }
+    }
+    pub fn method(mut self, method: HttpMethod) -> Self {
+        self.method = Some(method);
+        self
+    }
+    pub fn header<T>(mut self, name: &str, value: T) -> Self
+    where
+        T: std::fmt::Display,
+    {
+        let headers = self.headers.get_or_insert(Vec::new());
+        headers.push(HttpHeader::new(name, value));
+        self
+    }
+    pub fn body(mut self, new_data: &[u8]) -> Self {
+        let data = self.data.get_or_insert(Vec::new());
+        data.extend_from_slice(new_data);
+        self
+    }
+    pub fn url(mut self, url: &str) -> Self {
+        self.url = Some(url.to_string());
+        self
+    }
+    pub fn build(self) -> HttpRequest {
+        let version = self.version.unwrap();
+        let method = self.method.unwrap();
+        let body = self.data.unwrap_or_default();
+        let headers = self.headers.unwrap_or_default();
+        let url = self.url.unwrap();
+        HttpRequest {
+            version,
+            body,
+            headers,
+            chunks: Vec::new(),
+            chunked: false,
+            method,
+            url: Url {
+                inner: url.to_string(),
+            },
         }
     }
 }

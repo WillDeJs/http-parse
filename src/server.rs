@@ -4,7 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use http_parse::{HttpParser, HttpResponse};
+use http_parse::{HttpParser, HttpResponseBuilder};
 
 pub struct Server {
     inner: TcpListener,
@@ -17,7 +17,7 @@ impl Server {
 
     pub fn start<F>(&mut self, f: F) -> std::io::Result<()>
     where
-        F: Fn(TcpStream) -> (),
+        F: Fn(TcpStream),
         F: Send + Sync + 'static,
     {
         let pool = http_parse::threadpool::ThreadPool::new(64);
@@ -43,9 +43,11 @@ fn handle_connection(mut client: std::net::TcpStream) -> Result<(), std::io::Err
         client_addr.port(),
         request
     );
-    let mut response = HttpResponse::new()
-        .with_status_code(200)
-        .with_status_msg("Ok");
+    let mut response = HttpResponseBuilder::new()
+        .header("Content-Type", "text/plain")
+        .header("Content-Length", 11)
+        .build();
+
     response.put_header("Content-Type", "text/plain");
     response.put_header("Content-Length", 11);
     response.add_data("Hello world".as_bytes());
@@ -57,7 +59,7 @@ fn main() -> std::io::Result<()> {
     let mut server = Server::listen(8080)?;
     server
         .start(|client| {
-            let _ = handle_connection(client).expect("handle connection");
+            handle_connection(client).expect("handle connection");
         })
         .expect("Starting connections");
 

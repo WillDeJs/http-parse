@@ -1,4 +1,6 @@
-use crate::{parser::ByteBuffer, HttpHeader, HttpMethod, HttpVersion, H_TRANSFER_ENCODING};
+use crate::{
+    parser::ByteBuffer, HttpHeader, HttpMethod, HttpVersion, StatusCode, H_TRANSFER_ENCODING,
+};
 
 #[test]
 fn test_response() {
@@ -86,4 +88,10 @@ fn test_response_body_chuncked() {
     assert_eq!(Some(&transfer_header), response.header(H_TRANSFER_ENCODING));
     assert_eq!(response.data(), b"MozillaDeveloper Network");
     assert_eq!(response.into_bytes(), response_text.as_bytes());
+}
+
+#[test]
+fn test_status_code_conversion() {
+    assert_eq!(StatusCode::OK, 200);
+    assert_eq!(200, StatusCode::OK);
 }
