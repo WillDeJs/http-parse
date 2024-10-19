@@ -36,7 +36,7 @@ impl Server {
 fn handle_connection(mut client: std::net::TcpStream) -> Result<(), std::io::Error> {
     let client_addr = client.peer_addr()?;
     let mut parser = HttpParser::from_reader(&mut client);
-    let request = parser.read_request()?;
+    let request = parser.request()?;
     print!(
         "====> Request from: {}:{} <====\n{}",
         client_addr.ip(),

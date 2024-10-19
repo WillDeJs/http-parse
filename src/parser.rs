@@ -16,7 +16,13 @@ impl<'a, R: Read> HttpParser<'a, R> {
         }
     }
 
-    pub fn read_response(&mut self) -> std::io::Result<HttpResponse> {
+    pub fn response(&mut self) -> std::io::Result<HttpResponse> {
+        self.parse_response(true)
+    }
+    pub fn response_head_only(&mut self) -> std::io::Result<HttpResponse> {
+        self.parse_response(false)
+    }
+    fn parse_response(&mut self, include_data: bool) -> std::io::Result<HttpResponse> {
         let mut buffer = Vec::with_capacity(100);
         let _ = self.reader.read_until(b' ', &mut buffer)?;
         let version = Self::parse_version(&buffer)?;
@@ -44,20 +50,28 @@ impl<'a, R: Read> HttpParser<'a, R> {
             chunks,
             chunked: false,
         };
-        let encoding_header = response.header(H_TRANSFER_ENCODING).cloned();
-        let content_header = response.header(H_CONTENT_LENGTH).cloned();
+        if include_data {
+            let encoding_header = response.header(H_TRANSFER_ENCODING).cloned();
+            let content_header = response.header(H_CONTENT_LENGTH).cloned();
 
-        self.extract_body_data(
-            encoding_header,
-            content_header,
-            &mut response.chunks,
-            &mut response.body,
-        )?;
+            self.extract_body_data(
+                encoding_header,
+                content_header,
+                &mut response.chunks,
+                &mut response.body,
+            )?;
 
-        response.chunked = !response.chunks.is_empty();
+            response.chunked = !response.chunks.is_empty();
+        }
         Ok(response)
     }
-    pub fn read_request(&mut self) -> std::io::Result<HttpRequest> {
+    pub fn request(&mut self) -> std::io::Result<HttpRequest> {
+        self.parse_request(true)
+    }
+    pub fn request_head_only(&mut self) -> std::io::Result<HttpRequest> {
+        self.parse_request(false)
+    }
+    pub fn parse_request(&mut self, include_data: bool) -> std::io::Result<HttpRequest> {
         let mut buffer = Vec::with_capacity(100);
         let _ = self.reader.read_until(b' ', &mut buffer)?;
         let method = Self::parse_method(&buffer)?;
@@ -87,17 +101,19 @@ impl<'a, R: Read> HttpParser<'a, R> {
             chunked: false,
             chunks,
         };
-        let encoding_header = request.header(H_TRANSFER_ENCODING).cloned();
-        let content_header = request.header(H_CONTENT_LENGTH).cloned();
+        if include_data {
+            let encoding_header = request.header(H_TRANSFER_ENCODING).cloned();
+            let content_header = request.header(H_CONTENT_LENGTH).cloned();
 
-        self.extract_body_data(
-            encoding_header,
-            content_header,
-            &mut request.chunks,
-            &mut request.body,
-        )?;
+            self.extract_body_data(
+                encoding_header,
+                content_header,
+                &mut request.chunks,
+                &mut request.body,
+            )?;
 
-        request.chunked = !request.chunks.is_empty();
+            request.chunked = !request.chunks.is_empty();
+        }
         Ok(request)
     }
 
@@ -110,7 +126,7 @@ impl<'a, R: Read> HttpParser<'a, R> {
     ) -> Result<(), std::io::Error> {
         let mut chunked = false;
         encoding_header.inspect(|h| {
-            if h.value.contains("identity") {
+            if !h.value.contains("identity") {
                 chunked = true;
             }
         });

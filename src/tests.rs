@@ -12,7 +12,7 @@ Content-Length: 45\r
 <!-- HTML content follows -->";
     let mut reader = ByteBuffer::new(response.as_bytes());
     let mut parser = crate::HttpParser::from_reader(&mut reader);
-    let response = parser.read_response().unwrap();
+    let response = parser.response().unwrap();
     assert_eq!(response.version(), HttpVersion::Http1);
     assert_eq!(response.status_code(), 200);
     assert_eq!(response.status_msg(), "OK".to_string());
@@ -38,7 +38,7 @@ Content-Length: 44\r
 
     let mut reader = ByteBuffer::new(response_text.as_bytes());
     let mut parser = crate::HttpParser::from_reader(&mut reader);
-    let response = parser.read_response().unwrap();
+    let response = parser.response().unwrap();
     assert_eq!(response_text.as_bytes(), &response.into_bytes());
 }
 
@@ -50,7 +50,7 @@ Accept-Language: fr\r\n";
 
     let mut reader = ByteBuffer::new(request.as_bytes());
     let mut parser = crate::HttpParser::from_reader(&mut reader);
-    let request = parser.read_request().unwrap();
+    let request = parser.request().unwrap();
 
     assert_eq!(request.version(), HttpVersion::Http1);
     assert_eq!(request.method(), HttpMethod::Get);
@@ -62,11 +62,12 @@ Accept-Language: fr\r\n";
 }
 #[test]
 fn test_request_bytes() {
-    let request_text = "GET / HTTP/1.1\r\nHost: developer.mozilla.org\r\nAccept-Language: fr\r\n";
+    let request_text =
+        "GET / HTTP/1.1\r\nHost: developer.mozilla.org\r\nAccept-Language: fr\r\n\r\n";
 
     let mut reader = ByteBuffer::new(request_text.as_bytes());
     let mut parser = crate::HttpParser::from_reader(&mut reader);
-    let request = parser.read_request().unwrap();
+    let request = parser.request().unwrap();
     assert_eq!(&request.into_bytes(), request_text.as_bytes());
 }
 
@@ -76,7 +77,7 @@ fn test_response_body_chuncked() {
 
     let mut reader = ByteBuffer::new(response_text.as_bytes());
     let mut parser = crate::HttpParser::from_reader(&mut reader);
-    let response = parser.read_response().unwrap();
+    let response = parser.response().unwrap();
     let transfer_header = HttpHeader {
         name: "Transfer-Encoding".to_string(),
         value: "chunked".to_string(),

@@ -177,6 +177,10 @@ impl HttpRequest {
             });
         }
     }
+    pub fn remove_header(&mut self, name: &str) {
+        self.headers
+            .retain(|header| header.name.to_lowercase().ne(&name.to_lowercase()));
+    }
     pub fn method(&self) -> HttpMethod {
         self.method
     }
