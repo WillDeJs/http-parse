@@ -15,7 +15,7 @@ Content-Length: 45\r
     let mut reader = ByteBuffer::new(response.as_bytes());
     let mut parser = HttpParser::from_reader(&mut reader);
     let response = parser.response().unwrap();
-    assert_eq!(response.version(), HttpVersion::Http1);
+    assert_eq!(response.version(), HttpVersion::Http11);
     assert_eq!(response.status_code(), 200);
     assert_eq!(response.status_msg(), "OK".to_string());
     let data = r"<!doctype html>
@@ -51,7 +51,7 @@ Accept-Language: fr\r\n";
     let mut parser = HttpParser::from_reader(&mut reader);
     let request = parser.request().unwrap();
 
-    assert_eq!(request.version(), HttpVersion::Http1);
+    assert_eq!(request.version(), HttpVersion::Http11);
     assert_eq!(request.method(), HttpMethod::Get);
     let my_header = HttpHeader::new("host", "developer.mozilla.org");
     assert_eq!(request.header("host"), Some(&my_header));

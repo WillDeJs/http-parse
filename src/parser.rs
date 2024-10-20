@@ -5,23 +5,64 @@ use crate::{
     H_TRANSFER_ENCODING,
 };
 
+/// A Parser for HTTP content.
+/// Currently this implementation only follows HTTP 1.1.
+/// This parser is a naive implementation of a parser of the HTTP protocol.
+///
+/// The parser supports partsing Responses from any structure that implements the `std::io::Read`` trait.
+///
+/// # Example:
+/// ```no_run
+///   use http_parse::ByteBuffer;
+///   let request_text =
+///         "GET / HTTP/1.1\r\nHost: developer.mozilla.org\r\nAccept-Language: fr\r\n\r\n";
+///         
+///  let mut reader = ByteBuffer::new(request_text.as_bytes());
+///  let mut parser = http_parse::HttpParser::from_reader(&mut reader);
+///  let request = parser.request().unwrap();
+///  assert_eq!(&request.into_bytes(), request_text.as_bytes());
+/// ```
+///
 pub struct HttpParser<'a, R> {
     reader: BufReader<&'a mut R>,
 }
 
 impl<'a, R: Read> HttpParser<'a, R> {
+    /// Create a HTTP Parser from a reader that implements `std::io::Read`.
     pub fn from_reader(reader: &'a mut R) -> Self {
         Self {
             reader: BufReader::new(reader),
         }
     }
 
+    /// Parse a `HttpResponse` by reading bytes in this reader/stream.
+    ///
+    /// The Response parsed through this methos includes:
+    /// `HttpHeader`
+    /// `HttpVersion`
+    /// `StatusCode`
+    /// `body data` and more.
+    ///
+    /// # Errors:
+    /// When reading from the Reader produces any error or the data provided is not formatted properly.
     pub fn response(&mut self) -> std::io::Result<HttpResponse> {
         self.parse_response(true)
     }
+
+    /// Parse a `HttpResponse` by reading bytes in this reader/stream.
+    ///
+    /// The Response parsed through this methos includes:
+    /// `HttpHeader`
+    /// `HttpVersion`
+    /// `StatusCode`
+    /// `body data` is skipped completely.
+    ///
+    /// # Errors:
+    /// When reading from the Reader produces any error or the data provided is not formatted properly.
     pub fn response_head_only(&mut self) -> std::io::Result<HttpResponse> {
         self.parse_response(false)
     }
+
     fn parse_response(&mut self, include_data: bool) -> std::io::Result<HttpResponse> {
         let mut buffer = Vec::with_capacity(100);
         let _ = self.reader.read_until(b' ', &mut buffer)?;
@@ -65,9 +106,31 @@ impl<'a, R: Read> HttpParser<'a, R> {
         }
         Ok(response)
     }
+
+    /// Parse a `HttpRequest` by reading bytes in this reader/stream.
+    ///
+    /// The Request parsed through this methos includes:
+    /// `HttpHeader`
+    /// `HttpMethod`
+    /// `Requested URL`
+    /// `body data` and more.
+    ///
+    /// # Errors:
+    /// When reading from the Reader produces any error or the data provided is not formatted properly.
     pub fn request(&mut self) -> std::io::Result<HttpRequest> {
         self.parse_request(true)
     }
+
+    /// Parse a `HttpRequest` by reading bytes in this reader/stream.
+    ///
+    /// The Request parsed through this methos includes:
+    /// `HttpHeader`
+    /// `HttpMethod`
+    /// `Requested URL`
+    /// `body data` is skipped completely.
+    ///
+    /// # Errors:
+    /// When reading from the Reader produces any error or the data provided is not formatted properly.
     pub fn request_head_only(&mut self) -> std::io::Result<HttpRequest> {
         self.parse_request(false)
     }
@@ -214,7 +277,7 @@ impl<'a, R: Read> HttpParser<'a, R> {
 
     fn parse_version(version: &[u8]) -> std::io::Result<HttpVersion> {
         match version.trim_ascii() {
-            b"HTTP/1.1" => Ok(HttpVersion::Http1),
+            b"HTTP/1.1" => Ok(HttpVersion::Http11),
             // b"HTTP/2" => Ok(HttpVersion::Http2),
             // b"HTTP/3" => Ok(HttpVersion::Http3),
             _ => Err(std::io::Error::new(
@@ -330,6 +393,28 @@ impl<'a, R: Read> HttpParser<'a, R> {
     }
 }
 
+/// A ByteBuffer data container which implements Read.
+/// Useful for when HTTP data is exist in memory andthe HttpParser is used for parsing it.
+///
+/// # Example:
+/// ```no_run
+/// # use http_parse::ByteBuffer;
+/// # use http_parse::H_TRANSFER_ENCODING;
+/// # use http_parse::H_HOST;
+/// # use http_parse::HttpRequestBuilder;
+/// # use http_parse::HttpHeader;
+/// let range_value = "0-5000/10000";
+/// let response_text="HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nTransfer-Encoding: chunked\r\n\r\n7\r\nMozilla\r\n11\r\nDeveloper Network\r\n0\r\n\r\n";
+///
+/// let mut reader = ByteBuffer::new(response_text.as_bytes());
+/// let mut parser = http_parse::HttpParser::from_reader(&mut reader);
+/// let response = parser.response().unwrap();
+/// let transfer_header = HttpHeader::new("Transfer-Encoding", "chunked");
+///
+/// assert_eq!(Some(&transfer_header), response.header(H_TRANSFER_ENCODING));
+/// assert_eq!(response.data(), b"MozillaDeveloper Network");
+/// assert_eq!(response.into_bytes(), response_text.as_bytes());
+/// ```
 pub struct ByteBuffer {
     inner: Vec<u8>,
     index: usize,
