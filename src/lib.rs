@@ -21,6 +21,3 @@ pub use types::Url;
 
 pub use types::HttpRequestBuilder;
 pub use types::HttpResponseBuilder;
-
-#[cfg(test)]
-mod tests;

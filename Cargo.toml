@@ -11,8 +11,12 @@ debug = true
 
 [[example]]
 name="server"
-path="src/server.rs"
+path="src/examples/server.rs"
 
 [[example]]
 name="client"
-path="src/client.rs"
+path="src/examples/client.rs"
+
+[[test]]
+name="tests"
+path = "src/tests/parsing.rs"
