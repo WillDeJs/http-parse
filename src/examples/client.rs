@@ -1,8 +1,8 @@
 use std::{io::Write, net::TcpStream};
 
 use http_parse::{
-    HttpMethod, HttpParser, HttpRequestBuilder, H_CONTENT_LENGTH, H_CONTENT_RANGE,
-    H_HOST, H_RANGE, S_PARTIAL_CONTENT,
+    HttpMethod, HttpParser, HttpRequestBuilder, H_CONTENT_LENGTH, H_CONTENT_RANGE, H_HOST, H_RANGE,
+    H_USER_AGENT, S_PARTIAL_CONTENT,
 };
 
 const MAX_CHUNK_SIZE: usize = 1_000_000; // 1 MB
@@ -14,7 +14,8 @@ impl Client {
         let request = HttpRequestBuilder::new()
             .method(HttpMethod::Head)
             .url(req)
-            .header(H_HOST, "192.168.1.8")
+            .header(H_USER_AGENT, "Mozilla 5.0 (WD TEST)")
+            .header(H_HOST, host)
             .build();
 
         client.write_all(&request.into_bytes())?;
@@ -30,13 +31,14 @@ impl Client {
     fn one_shot_download(host: &str, req: &str) -> std::io::Result<()> {
         let mut client = TcpStream::connect(host)?;
         let request = HttpRequestBuilder::new()
-            .method(HttpMethod::Head)
+            .method(HttpMethod::Get)
             .url(req)
-            .header(H_HOST, "192.168.1.8")
+            .header(H_USER_AGENT, "Mozilla 5.0 (WD TEST)")
+            .header(H_HOST, host)
             .build();
         client.write_all(&request.into_bytes())?;
         let response = HttpParser::from_reader(&mut client).response()?;
-        let mut out_file = std::fs::File::create(format!("./{req}"))?;
+        let mut out_file = std::fs::File::create(format!("{req}"))?;
         out_file.write_all(response.data())?;
         Ok(())
     }
@@ -44,14 +46,15 @@ impl Client {
     fn ranged_download(host: &str, req: &str, size: usize) -> std::io::Result<()> {
         let mut start_byte_index = 0;
         let mut chunk_size = std::cmp::min(MAX_CHUNK_SIZE, size);
-        let mut out_file = std::fs::File::create(format!("./{req}"))?;
+        let mut out_file = std::fs::File::create(format!("{req}"))?;
         let mut total_written = 0;
 
         let range_value = format!("bytes={}-{}", start_byte_index, chunk_size);
         let mut request = HttpRequestBuilder::new()
             .url(req)
-            .header(H_HOST, "192.168.1.8")
+            .header(H_HOST, host)
             .header(H_RANGE, range_value)
+            .header(H_USER_AGENT, "Mozilla 5.0 (WD TEST)")
             .build();
         loop {
             let mut client = TcpStream::connect(host)?;
