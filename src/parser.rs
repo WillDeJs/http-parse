@@ -1,7 +1,7 @@
 use std::io::{BufRead, BufReader, ErrorKind, Read};
 
 use crate::{
-    HttpHeader, HttpMethod, HttpRequest, HttpResponse, HttpVersion, Url, H_CONTENT_LENGTH,
+    HttpHeader, HttpMethod, HttpRequest, HttpResponse, HttpVersion, H_CONTENT_LENGTH,
     H_TRANSFER_ENCODING,
 };
 
@@ -157,7 +157,7 @@ impl<'a, R: Read> HttpParser<'a, R> {
 
         let mut request = HttpRequest {
             method,
-            url: Url { inner: url },
+            url,
             version,
             headers,
             body,
@@ -277,9 +277,10 @@ impl<'a, R: Read> HttpParser<'a, R> {
 
     fn parse_version(version: &[u8]) -> std::io::Result<HttpVersion> {
         match version.trim_ascii() {
+            b"HTTP/1.0" => Ok(HttpVersion::Http10),
             b"HTTP/1.1" => Ok(HttpVersion::Http11),
-            // b"HTTP/2" => Ok(HttpVersion::Http2),
-            // b"HTTP/3" => Ok(HttpVersion::Http3),
+            b"HTTP/2" => Ok(HttpVersion::Http2),
+            b"HTTP/3" => Ok(HttpVersion::Http3),
             _ => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!(

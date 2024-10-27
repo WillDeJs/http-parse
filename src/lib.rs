@@ -76,8 +76,9 @@ pub use types::HttpHeader;
 pub use types::HttpMethod;
 pub use types::HttpRequest;
 pub use types::HttpResponse;
+pub use types::HttpUrl;
 pub use types::HttpVersion;
-pub use types::Url;
 
 pub use types::HttpRequestBuilder;
 pub use types::HttpResponseBuilder;
+pub use types::HttpUrlBuilder;

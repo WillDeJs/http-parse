@@ -1,4 +1,8 @@
-use std::{fmt::Display, str::FromStr};
+use std::{
+    collections::HashMap,
+    fmt::{Display, Formatter},
+    str::FromStr,
+};
 
 use crate::{StatusCode, H_CONTENT_LENGTH, H_TRANSFER_ENCODING};
 
@@ -80,6 +84,7 @@ impl Display for HttpHeader {
 /// A HTTP Version struct. Can be HTTP1.1, HTTP2, HTTP3
 #[derive(PartialEq, Clone, Copy, Debug)]
 pub enum HttpVersion {
+    Http10,
     Http11,
     Http2,
     Http3,
@@ -87,16 +92,12 @@ pub enum HttpVersion {
 impl Display for HttpVersion {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            HttpVersion::Http10 => write!(f, "HTTP/1.0"),
             HttpVersion::Http11 => write!(f, "HTTP/1.1"),
             HttpVersion::Http2 => write!(f, "HTTP/2"),
             HttpVersion::Http3 => write!(f, "HTTP/3"),
         }
     }
-}
-/// WIP A url structure
-#[derive(PartialEq)]
-pub struct Url {
-    pub(crate) inner: String,
 }
 
 /// A HTTP Request structure.
@@ -110,7 +111,7 @@ pub struct Url {
 #[derive(PartialEq)]
 pub struct HttpRequest {
     pub(crate) method: HttpMethod,
-    pub(crate) url: Url,
+    pub(crate) url: String,
     pub(crate) version: HttpVersion,
     pub(crate) headers: Vec<HttpHeader>,
     pub(crate) body: Vec<u8>,
@@ -134,9 +135,7 @@ impl HttpRequest {
             headers: Vec::new(),
             body: Vec::new(),
             method: HttpMethod::Get,
-            url: Url {
-                inner: "\\".to_string(),
-            },
+            url: "\\".to_string(),
             chunks: Vec::new(),
             chunked: false,
         }
@@ -233,13 +232,7 @@ impl HttpRequest {
         let mut bytes = Vec::new();
         // first line, version + status code  + msg
         bytes.extend_from_slice(
-            &format!(
-                "{} {} {}\r\n",
-                self.method(),
-                self.url.inner,
-                self.version()
-            )
-            .into_bytes(),
+            &format!("{} {} {}\r\n", self.method(), self.url, self.version()).into_bytes(),
         );
         // next all headers
         for header in self.headers() {
@@ -269,7 +262,7 @@ impl HttpRequest {
 
 impl Display for HttpRequest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} {} {}\r\n", self.method, self.url.inner, self.version)?;
+        write!(f, "{} {} {}\r\n", self.method, self.url, self.version)?;
         self.headers.iter().for_each(|header| {
             let _ = write!(f, "{}\r\n", header);
         });
@@ -720,9 +713,223 @@ impl HttpRequestBuilder {
             chunks: Vec::new(),
             chunked: false,
             method,
-            url: Url {
-                inner: url.to_string(),
-            },
+            url: url.to_string(),
+        }
+    }
+}
+
+impl TryFrom<&str> for HttpUrl {
+    type Error = &'static str;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Self::parse(value)
+    }
+}
+pub enum UrlError {
+    InvalidScheme(String),
+    InvalidCharacter(char),
+    InvalidPathStart(char),
+}
+
+#[derive(Debug)]
+pub struct HttpUrl {
+    scheme: String,
+    host: String,
+    port: Option<u16>,
+    path: String,
+    query: HashMap<String, String>,
+    fragment: Option<String>,
+}
+impl HttpUrl {
+    pub fn scheme(&self) -> &str {
+        &self.scheme
+    }
+
+    pub fn host(&self) -> &str {
+        &self.host
+    }
+
+    pub fn port(&self) -> Option<u16> {
+        self.port
+    }
+
+    pub fn path(&self) -> &str {
+        &self.path
+    }
+
+    pub fn query(&self) -> &HashMap<String, String> {
+        &self.query
+    }
+
+    pub fn fragment(&self) -> Option<&String> {
+        self.fragment.as_ref()
+    }
+    pub fn file(&self) -> Option<&str> {
+        if self.path.ends_with("/") || !self.path.contains('.') {
+            None
+        } else {
+            self.path.split("/").last()
+        }
+    }
+    pub fn get_url_target(&self) -> String {
+        let mut url = self.path.clone();
+
+        if !self.query.is_empty() {
+            let query_string: Vec<String> = self
+                .query
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, v))
+                .collect();
+            url.push_str(&format!("?{}", query_string.join("&")));
+        }
+
+        if let Some(fragment) = &self.fragment {
+            url.push_str(&format!("#{}", fragment));
+        }
+
+        url
+    }
+
+    pub fn parse(url: &str) -> Result<HttpUrl, &'static str> {
+        let (scheme, remainder) = if let Some(pos) = url.find("://") {
+            let (scheme, remainder) = url.split_at(pos);
+            (scheme.to_string(), &remainder[3..])
+        } else {
+            ("http".to_string(), url)
+        };
+
+        let mut host_parts = remainder.splitn(2, '/');
+        let host_port = host_parts.next().unwrap();
+        let path = format!("/{}", host_parts.next().unwrap_or("").to_string());
+
+        let (host, port) = if let Some(colon_pos) = host_port.find(':') {
+            let host = &host_port[..colon_pos];
+            let port = &host_port[colon_pos + 1..];
+            (
+                host.to_string(),
+                Some(port.parse::<u16>().map_err(|_| "Invalid port")?),
+            )
+        } else {
+            (host_port.to_string(), None)
+        };
+
+        let mut query = HashMap::new();
+        let mut fragment = None;
+        let mut path_without_query = &path[..];
+
+        if let Some(fragment_pos) = path.find('#') {
+            fragment = Some(path[fragment_pos + 1..].to_string());
+            path_without_query = &path[..fragment_pos];
+        }
+
+        if let Some(query_pos) = path_without_query.find('?') {
+            let query_string = &path_without_query[query_pos + 1..];
+            path_without_query = &path_without_query[..query_pos];
+            for kv in query_string.split('&') {
+                let mut kv_parts = kv.split('=');
+                let key = kv_parts.next().unwrap().to_string();
+                let value = kv_parts.next().unwrap_or("").to_string();
+                query.insert(key, value);
+            }
+        }
+
+        Ok(HttpUrl {
+            scheme,
+            host,
+            port,
+            path,
+            query,
+            fragment,
+        })
+    }
+}
+
+impl Display for HttpUrl {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let mut url = format!("{}://{}", self.scheme, self.host);
+
+        if let Some(port) = self.port {
+            url.push_str(&format!(":{}", port));
+        }
+        url.push_str(&self.path);
+
+        if !self.query.is_empty() {
+            let query_string: Vec<String> = self
+                .query
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, v))
+                .collect();
+            url.push_str(&format!("?{}", query_string.join("&")));
+        }
+
+        if let Some(fragment) = &self.fragment {
+            url.push_str(&format!("#{}", fragment));
+        }
+
+        write!(f, "{}", url)
+    }
+}
+
+#[derive(Debug)]
+pub struct HttpUrlBuilder {
+    scheme: String,
+    host: String,
+    port: Option<u16>,
+    path: String,
+    query: HashMap<String, String>,
+    fragment: Option<String>,
+}
+
+impl HttpUrlBuilder {
+    pub fn new() -> Self {
+        Self {
+            scheme: "http".to_string(), // Default scheme
+            host: "".to_string(),
+            port: None,
+            path: "".to_string(),
+            query: HashMap::new(),
+            fragment: None,
+        }
+    }
+
+    pub fn scheme(mut self, scheme: &str) -> Self {
+        self.scheme = scheme.to_string();
+        self
+    }
+
+    pub fn host(mut self, host: &str) -> Self {
+        self.host = host.to_string();
+        self
+    }
+
+    pub fn port(mut self, port: u16) -> Self {
+        self.port = Some(port);
+        self
+    }
+
+    pub fn path(mut self, path: &str) -> Self {
+        self.path = path.to_string();
+        self
+    }
+
+    pub fn fragment(mut self, fragment: &str) -> Self {
+        self.fragment = Some(fragment.to_string());
+        self
+    }
+
+    pub fn param(mut self, key: &str, value: &str) -> Self {
+        self.query.insert(key.to_string(), value.to_string());
+        self
+    }
+
+    pub fn build(self) -> HttpUrl {
+        HttpUrl {
+            scheme: self.scheme,
+            host: self.host,
+            port: self.port,
+            path: self.path,
+            query: self.query,
+            fragment: self.fragment,
         }
     }
 }
