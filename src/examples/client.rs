@@ -1,74 +1,101 @@
 use std::{io::Write, net::TcpStream};
 
 use http_parse::{
-    HttpMethod, HttpParser, HttpRequestBuilder, H_CONTENT_LENGTH, H_CONTENT_RANGE, H_HOST, H_RANGE,
-    H_USER_AGENT, S_PARTIAL_CONTENT,
+    HttpMethod, HttpParser, HttpRequestBuilder, HttpUrl, StatusCode, H_CONTENT_LENGTH,
+    H_CONTENT_RANGE, H_HOST, H_RANGE, H_USER_AGENT, S_PARTIAL_CONTENT,
 };
 
 const MAX_CHUNK_SIZE: usize = 1_000_000; // 1 MB
 pub struct Client;
 
 impl Client {
-    fn get_file_size(host: &str, req: &str) -> std::io::Result<usize> {
-        let mut client = TcpStream::connect(host)?;
+    fn get_file_size(url: &HttpUrl) -> Result<usize, String> {
+        let mut client = TcpStream::connect(url.address()).map_err(|e| e.to_string())?;
         let request = HttpRequestBuilder::new()
             .method(HttpMethod::Head)
-            .url(req)
-            .header(H_USER_AGENT, "Mozilla 5.0 (WD TEST)")
-            .header(H_HOST, host)
+            .path(url.path())
+            .header(H_USER_AGENT, "Mozilla/5.0 (WD TEST)")
+            .header(H_HOST, url.host())
             .build();
-
-        client.write_all(&request.into_bytes())?;
+        println!("{}", request);
+        client
+            .write_all(&request.into_bytes())
+            .map_err(|e| e.to_string())?;
         let mut parser = HttpParser::from_reader(&mut client);
-        let response = parser.response_head_only()?;
+        let response = parser.response_head_only().map_err(|e| e.to_string())?;
         print!("{}", response);
+        if response.status_code() != StatusCode::OK {
+            return Err(format!(
+                "Unexpected status code `{}` from server",
+                response.status_code()
+            ));
+        }
         if let Some(header) = response.header(H_CONTENT_LENGTH) {
             Ok(header.value::<usize>().unwrap_or(0))
         } else {
             Ok(0)
         }
     }
-    fn one_shot_download(host: &str, req: &str) -> std::io::Result<()> {
-        let mut client = TcpStream::connect(host)?;
+    fn one_shot_download(url: &HttpUrl) -> Result<(), String> {
+        let mut client = TcpStream::connect(url.address()).map_err(|e| e.to_string())?;
+        let file = url.file().unwrap_or(url.path());
         let request = HttpRequestBuilder::new()
             .method(HttpMethod::Get)
-            .url(req)
-            .header(H_USER_AGENT, "Mozilla 5.0 (WD TEST)")
-            .header(H_HOST, host)
+            .path(url.path())
+            .header(H_USER_AGENT, "Mozilla/5.0 (WD TEST)")
+            .header(H_HOST, url.host())
             .build();
-        client.write_all(&request.into_bytes())?;
-        let response = HttpParser::from_reader(&mut client).response()?;
-        let mut out_file = std::fs::File::create(format!("{req}"))?;
-        out_file.write_all(response.data())?;
+        client
+            .write_all(&request.into_bytes())
+            .map_err(|e| e.to_string())?;
+        let response = HttpParser::from_reader(&mut client)
+            .response()
+            .map_err(|e| e.to_string())?;
+        if response.status_code() != StatusCode::OK {
+            return Err(format!(
+                "Unexpected status code `{}` from server",
+                response.status_code()
+            ));
+        }
+        let mut out_file = std::fs::File::create(file).map_err(|e| e.to_string())?;
+        out_file
+            .write_all(response.data())
+            .map_err(|e| e.to_string())?;
         Ok(())
     }
 
-    fn ranged_download(host: &str, req: &str, size: usize) -> std::io::Result<()> {
+    fn ranged_download(url: &HttpUrl, size: usize) -> Result<(), String> {
         let mut start_byte_index = 0;
         let mut chunk_size = std::cmp::min(MAX_CHUNK_SIZE, size);
-        let mut out_file = std::fs::File::create(format!("{req}"))?;
+        let file = url.file().unwrap_or(url.path());
+
+        let mut out_file = std::fs::File::create(file).map_err(|e| e.to_string())?;
         let mut total_written = 0;
 
         let range_value = format!("bytes={}-{}", start_byte_index, chunk_size);
         let mut request = HttpRequestBuilder::new()
-            .url(req)
-            .header(H_HOST, host)
+            .path(url.path())
+            .header(H_HOST, url.host())
             .header(H_RANGE, range_value)
-            .header(H_USER_AGENT, "Mozilla 5.0 (WD TEST)")
+            .header(H_USER_AGENT, "Mozilla/5.0 (WD TEST)")
             .build();
+        println!("{}", request);
         loop {
-            let mut client = TcpStream::connect(host)?;
-            client.write_all(&request.into_bytes())?;
-            let response = HttpParser::from_reader(&mut client).response()?;
+            let mut client = TcpStream::connect(url.address()).map_err(|e| e.to_string())?;
+            client
+                .write_all(&request.into_bytes())
+                .map_err(|e| e.to_string())?;
+            let response = HttpParser::from_reader(&mut client)
+                .response()
+                .map_err(|e| e.to_string())?;
             let status_code = response.status_code();
             if status_code != S_PARTIAL_CONTENT {
-                eprintln!(
+                return Err(format!(
                     "Expected code STATUS CODE`{}`, instead got `{}: {}`",
                     S_PARTIAL_CONTENT,
                     status_code,
                     response.status_msg()
-                );
-                return Ok(());
+                ));
             }
             let range_header = response.header(H_CONTENT_RANGE);
             if range_header.is_none() {
@@ -90,7 +117,7 @@ impl Client {
 
             let req_data = response.data();
             let body_length = req_data.len();
-            out_file.write_all(req_data)?;
+            out_file.write_all(req_data).map_err(|e| e.to_string())?;
             total_written += body_length;
             println!("Downloaded: {} / {} ", total_written, tokens[2]);
             if total_written >= tokens[2] {
@@ -112,20 +139,24 @@ impl Client {
         }
     }
 
-    pub fn download(host: &str, req: &str) -> std::io::Result<()> {
-        let file_size = Self::get_file_size(host, req)?;
-        println!("Downloading `{}` with size `{} bytes`", req, file_size);
+    pub fn download(url: &HttpUrl) -> Result<(), String> {
+        let file_size = Self::get_file_size(url)?;
+        println!(
+            "Downloading `{}` with size `{} bytes`",
+            url.path(),
+            file_size
+        );
         if file_size > MAX_CHUNK_SIZE {
-            Self::ranged_download(host, req, file_size)?;
+            Self::ranged_download(url, file_size)?;
         } else {
-            Self::one_shot_download(host, req)?;
+            Self::one_shot_download(url)?;
         }
         Ok(())
     }
 }
 
-fn main() -> std::io::Result<()> {
-    Client::download("192.168.1.8:8080", "/Video.mp4")?;
-
+fn main() -> Result<(), String> {
+    let url = HttpUrl::parse("192.168.1.8:8080/Video.mp4").expect("URL Parsing");
+    Client::download(&url).unwrap();
     Ok(())
 }

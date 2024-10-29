@@ -258,6 +258,10 @@ impl HttpRequest {
         }
         bytes
     }
+    /// Create a HttpUrlBuilder to construct this URL
+    pub fn builder() -> HttpRequestBuilder {
+        HttpRequestBuilder::default()
+    }
 }
 
 impl Display for HttpRequest {
@@ -447,6 +451,11 @@ impl HttpResponse {
         }
         bytes
     }
+
+    /// Create a HttpUrlBuilder to construct this URL
+    pub fn builder() -> HttpResponseBuilder {
+        HttpResponseBuilder::default()
+    }
 }
 
 impl Display for HttpResponse {
@@ -593,14 +602,12 @@ impl HttpResponseBuilder {
 /// use http_parse::HttpRequestBuilder;
 /// use http_parse::H_HOST;
 /// use http_parse::HttpMethod;
-/// fn main () {
-///     let mut request = HttpRequestBuilder::new()
-///         .url("/")
-///         .header(H_HOST, "192.168.1.8")
-///         .header(H_RANGE, 0-5000/100000)
-///         .build();
+/// let mut request = HttpRequestBuilder::new()
+///     .path("/")
+///     .header(H_HOST, "192.168.1.8")
+///     .header(H_RANGE, 0-5000/100000)
+///     .build();
 /// // code here
-/// }
 /// ```
 pub struct HttpRequestBuilder {
     method: Option<HttpMethod>,
@@ -666,12 +673,22 @@ impl HttpRequestBuilder {
         self
     }
 
+    // Add a path to this HTTP Request.
+    /// See also [`crate::HttpRequestBuilder::url`] method but can be given a string rather than [HttpUrl].
+    ///
+    /// # Arguments
+    /// `url` URL being added
+    pub fn path(mut self, url: &str) -> Self {
+        self.url = Some(url.to_string());
+        self
+    }
+
     /// Add a URL to this HTTP Request
     ///
     /// # Arguments
     /// `url` URL being added
-    pub fn url(mut self, url: &str) -> Self {
-        self.url = Some(url.to_string());
+    pub fn url(mut self, url: &HttpUrl) -> Self {
+        self.url = Some(url.target());
         self
     }
 
@@ -692,7 +709,7 @@ impl HttpRequestBuilder {
     ///     let mut client = TcpStream::connect(host)?;
     ///     let request = HttpRequestBuilder::new()
     ///        .method(HttpMethod::Head)
-    ///        .url(req)
+    ///        .path(req)
     ///        .header(H_HOST, "192.168.1.8")
     ///        .build();
     ///
@@ -725,12 +742,18 @@ impl TryFrom<&str> for HttpUrl {
         Self::parse(value)
     }
 }
-pub enum UrlError {
-    InvalidScheme(String),
-    InvalidCharacter(char),
-    InvalidPathStart(char),
-}
 
+/// HTTP URL Structure
+/// Provides methods to parse a URL as well as to create one.
+///
+/// # Example:
+/// ```rust
+/// # use http_parse::{HttpUrl};
+/// let google_url = HttpUrl::builder()
+///         .scheme("https")
+///         .host("www.google.com")
+///         .build();
+/// ```
 #[derive(Debug)]
 pub struct HttpUrl {
     scheme: String,
@@ -741,29 +764,48 @@ pub struct HttpUrl {
     fragment: Option<String>,
 }
 impl HttpUrl {
+    /// Get the schema for this URL
     pub fn scheme(&self) -> &str {
         &self.scheme
     }
 
+    /// Get the host for this URL
     pub fn host(&self) -> &str {
         &self.host
     }
 
+    /// Get the port for this URL if one exists
     pub fn port(&self) -> Option<u16> {
         self.port
     }
 
+    /// Get the path for this URL
     pub fn path(&self) -> &str {
         &self.path
     }
 
-    pub fn query(&self) -> &HashMap<String, String> {
-        &self.query
+    /// Retrieve the connection address
+    pub fn address(&self) -> String {
+        if let Some(port) = self.port() {
+            format!("{}:{}", self.host(), port)
+        } else {
+            self.host().to_string()
+        }
     }
 
+    /// Get the query argument with the current key if available in this URL
+    /// # Arguments
+    /// `key` key to be searched
+    pub fn query(&self, key: &str) -> Option<&String> {
+        self.query.get(key)
+    }
+
+    /// Get the fragment portion of this URL if available
     pub fn fragment(&self) -> Option<&String> {
         self.fragment.as_ref()
     }
+
+    /// Get a file path from this URL if one is contained.
     pub fn file(&self) -> Option<&str> {
         if self.path.ends_with("/") || !self.path.contains('.') {
             None
@@ -771,7 +813,9 @@ impl HttpUrl {
             self.path.split("/").last()
         }
     }
-    pub fn get_url_target(&self) -> String {
+    /// Get the URL's taget. This contains the
+    /// path + query arguments + fragment arguments if present.
+    pub fn target(&self) -> String {
         let mut url = self.path.clone();
 
         if !self.query.is_empty() {
@@ -790,6 +834,12 @@ impl HttpUrl {
         url
     }
 
+    /// Create a HttpUrlBuilder to construct this URL
+    pub fn builder() -> HttpUrlBuilder {
+        HttpUrlBuilder::default()
+    }
+
+    /// Parse a HTTP URL from a given string.
     pub fn parse(url: &str) -> Result<HttpUrl, &'static str> {
         let (scheme, remainder) = if let Some(pos) = url.find("://") {
             let (scheme, remainder) = url.split_at(pos);
@@ -800,7 +850,7 @@ impl HttpUrl {
 
         let mut host_parts = remainder.splitn(2, '/');
         let host_port = host_parts.next().unwrap();
-        let path = format!("/{}", host_parts.next().unwrap_or("").to_string());
+        let path = format!("/{}", host_parts.next().unwrap_or(""));
 
         let (host, port) = if let Some(colon_pos) = host_port.find(':') {
             let host = &host_port[..colon_pos];
@@ -851,7 +901,10 @@ impl Display for HttpUrl {
         if let Some(port) = self.port {
             url.push_str(&format!(":{}", port));
         }
-        url.push_str(&self.path);
+        if !self.path.is_empty() {
+            url.push('/');
+            url.push_str(&self.path);
+        }
 
         if !self.query.is_empty() {
             let query_string: Vec<String> = self
@@ -881,6 +934,7 @@ pub struct HttpUrlBuilder {
 }
 
 impl HttpUrlBuilder {
+    /// Create a new Builder
     pub fn new() -> Self {
         Self {
             scheme: "http".to_string(), // Default scheme
@@ -892,36 +946,46 @@ impl HttpUrlBuilder {
         }
     }
 
+    /// Assign a scheme to the URL.
     pub fn scheme(mut self, scheme: &str) -> Self {
         self.scheme = scheme.to_string();
         self
     }
 
+    /// Assigh a host to the URL.
     pub fn host(mut self, host: &str) -> Self {
         self.host = host.to_string();
         self
     }
 
+    /// Assign a port to the URL.
     pub fn port(mut self, port: u16) -> Self {
         self.port = Some(port);
         self
     }
 
+    /// Assign a path to the URL
     pub fn path(mut self, path: &str) -> Self {
         self.path = path.to_string();
         self
     }
 
+    /// Assign a fragment to the URL.
     pub fn fragment(mut self, fragment: &str) -> Self {
         self.fragment = Some(fragment.to_string());
         self
     }
 
-    pub fn param(mut self, key: &str, value: &str) -> Self {
+    /// Add a query key,value pair to the URL.
+    pub fn param<T>(mut self, key: &str, value: &T) -> Self
+    where
+        T: Display,
+    {
         self.query.insert(key.to_string(), value.to_string());
         self
     }
 
+    /// Construct the URL from the given arguments.
     pub fn build(self) -> HttpUrl {
         HttpUrl {
             scheme: self.scheme,
@@ -931,5 +995,11 @@ impl HttpUrlBuilder {
             query: self.query,
             fragment: self.fragment,
         }
+    }
+}
+
+impl Default for HttpUrlBuilder {
+    fn default() -> Self {
+        Self::new()
     }
 }

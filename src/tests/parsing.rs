@@ -1,5 +1,6 @@
 use http_parse::{
-    ByteBuffer, HttpHeader, HttpMethod, HttpParser, HttpVersion, StatusCode, H_TRANSFER_ENCODING,
+    ByteBuffer, HttpHeader, HttpMethod, HttpParser, HttpUrl, HttpVersion, StatusCode,
+    H_TRANSFER_ENCODING,
 };
 
 #[test]
@@ -85,4 +86,29 @@ fn test_response_body_chuncked() {
 fn test_status_code_conversion() {
     assert_eq!(StatusCode::OK, 200);
     assert_eq!(200, StatusCode::OK);
+}
+
+#[test]
+fn test_url() {
+    let google_url = HttpUrl::builder()
+        .scheme("https")
+        .host("www.google.com")
+        .build();
+    let localhost_url = HttpUrl::builder()
+        .scheme("http")
+        .host("127.0.0.1")
+        .port(8080)
+        .path("video.mp4")
+        .fragment("time")
+        .param("start", &56)
+        .build();
+
+    assert_eq!("https://www.google.com", &google_url.to_string());
+    assert_eq!(
+        "http://127.0.0.1:8080/video.mp4?start=56#time",
+        &localhost_url.to_string()
+    );
+    assert_eq!(localhost_url.fragment(), Some(&"time".to_owned()));
+    assert_eq!(localhost_url.query("start"), Some(&"56".to_owned()));
+    assert_eq!(localhost_url.file(), Some("video.mp4"));
 }
