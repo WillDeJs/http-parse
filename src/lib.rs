@@ -65,9 +65,6 @@ mod parser;
 #[allow(unused)]
 mod types;
 
-#[allow(unused)]
-pub mod threadpool;
-
 pub use definitions::*;
 pub use parser::ByteBuffer;
 pub use parser::HttpParser;
@@ -79,6 +76,7 @@ pub use types::HttpResponse;
 pub use types::HttpUrl;
 pub use types::HttpVersion;
 
+pub use types::HttpParseError;
 pub use types::HttpRequestBuilder;
 pub use types::HttpResponseBuilder;
 pub use types::HttpUrlBuilder;

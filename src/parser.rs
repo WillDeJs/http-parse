@@ -1,8 +1,11 @@
-use std::io::{BufRead, BufReader, ErrorKind, Read};
+use std::{
+    io::{BufRead, BufReader, ErrorKind, Read},
+    str::ParseBoolError,
+};
 
 use crate::{
-    HttpHeader, HttpMethod, HttpRequest, HttpResponse, HttpVersion, H_CONTENT_LENGTH,
-    H_TRANSFER_ENCODING,
+    types::HttpParseError, HttpHeader, HttpMethod, HttpRequest, HttpResponse, HttpVersion,
+    H_CONTENT_LENGTH, H_TRANSFER_ENCODING,
 };
 
 /// A Parser for HTTP content.
@@ -45,7 +48,7 @@ impl<'a, R: Read> HttpParser<'a, R> {
     ///
     /// # Errors:
     /// When reading from the Reader produces any error or the data provided is not formatted properly.
-    pub fn response(&mut self) -> std::io::Result<HttpResponse> {
+    pub fn response(&mut self) -> Result<HttpResponse, HttpParseError> {
         self.parse_response(true)
     }
 
@@ -59,11 +62,11 @@ impl<'a, R: Read> HttpParser<'a, R> {
     ///
     /// # Errors:
     /// When reading from the Reader produces any error or the data provided is not formatted properly.
-    pub fn response_head_only(&mut self) -> std::io::Result<HttpResponse> {
+    pub fn response_head_only(&mut self) -> Result<HttpResponse, HttpParseError> {
         self.parse_response(false)
     }
 
-    fn parse_response(&mut self, include_data: bool) -> std::io::Result<HttpResponse> {
+    fn parse_response(&mut self, include_data: bool) -> Result<HttpResponse, HttpParseError> {
         let mut buffer = Vec::with_capacity(100);
         let _ = self.reader.read_until(b' ', &mut buffer)?;
         let version = Self::parse_version(&buffer)?;
@@ -117,7 +120,7 @@ impl<'a, R: Read> HttpParser<'a, R> {
     ///
     /// # Errors:
     /// When reading from the Reader produces any error or the data provided is not formatted properly.
-    pub fn request(&mut self) -> std::io::Result<HttpRequest> {
+    pub fn request(&mut self) -> Result<HttpRequest, HttpParseError> {
         self.parse_request(true)
     }
 
@@ -131,10 +134,10 @@ impl<'a, R: Read> HttpParser<'a, R> {
     ///
     /// # Errors:
     /// When reading from the Reader produces any error or the data provided is not formatted properly.
-    pub fn request_head_only(&mut self) -> std::io::Result<HttpRequest> {
+    pub fn request_head_only(&mut self) -> Result<HttpRequest, HttpParseError> {
         self.parse_request(false)
     }
-    pub fn parse_request(&mut self, include_data: bool) -> std::io::Result<HttpRequest> {
+    pub fn parse_request(&mut self, include_data: bool) -> Result<HttpRequest, HttpParseError> {
         let mut buffer = Vec::with_capacity(100);
         let _ = self.reader.read_until(b' ', &mut buffer)?;
         let method = Self::parse_method(&buffer)?;
@@ -186,7 +189,7 @@ impl<'a, R: Read> HttpParser<'a, R> {
         content_header: Option<HttpHeader>,
         chunks: &mut Vec<(usize, usize)>,
         body: &mut Vec<u8>,
-    ) -> Result<(), std::io::Error> {
+    ) -> Result<(), HttpParseError> {
         let mut chunked = false;
         encoding_header.inspect(|h| {
             if !h.value.contains("identity") {
@@ -201,12 +204,7 @@ impl<'a, R: Read> HttpParser<'a, R> {
                     body.resize_with(length, || 0);
                     self.reader.read_exact(body)?;
                 }
-                Err(_e) => {
-                    Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        format!("Ivalid header `{}`", header).as_str(),
-                    ))?;
-                }
+                Err(_e) => Err(HttpParseError::Header(header.to_string()))?,
             };
         }
 
@@ -255,7 +253,7 @@ impl<'a, R: Read> HttpParser<'a, R> {
         Ok(())
     }
 
-    fn parse_method(method: &[u8]) -> std::io::Result<HttpMethod> {
+    fn parse_method(method: &[u8]) -> Result<HttpMethod, HttpParseError> {
         match method.trim_ascii() {
             b"GET" => Ok(HttpMethod::Get),
             b"POST" => Ok(HttpMethod::Post),
@@ -264,43 +262,30 @@ impl<'a, R: Read> HttpParser<'a, R> {
             b"OPTIONS" => Ok(HttpMethod::Options),
             b"DELETE" => Ok(HttpMethod::Delete),
             b"TRACE" => Ok(HttpMethod::Trace),
-
-            _ => Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!(
-                    "Invalid HTTP method in buffer `{}`.",
-                    String::from_utf8_lossy(method)
-                ),
+            _ => Err(HttpParseError::Method(
+                String::from_utf8_lossy(method).to_string(),
             )),
         }
     }
 
-    fn parse_version(version: &[u8]) -> std::io::Result<HttpVersion> {
+    fn parse_version(version: &[u8]) -> Result<HttpVersion, HttpParseError> {
         match version.trim_ascii() {
             b"HTTP/1.0" => Ok(HttpVersion::Http10),
             b"HTTP/1.1" => Ok(HttpVersion::Http11),
             b"HTTP/2" => Ok(HttpVersion::Http2),
             b"HTTP/3" => Ok(HttpVersion::Http3),
-            _ => Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!(
-                    "Unsuported HTTP version in buffer `{}`.",
-                    String::from_utf8_lossy(version.trim_ascii())
-                ),
+            _ => Err(HttpParseError::Version(
+                String::from_utf8_lossy(version.trim_ascii()).to_string(),
             )),
         }
     }
 
-    fn parse_status_code(status_code: &[u8]) -> std::io::Result<usize> {
+    fn parse_status_code(status_code: &[u8]) -> Result<usize, HttpParseError> {
         let code_string = String::from_utf8_lossy(status_code);
         match code_string.trim().parse::<usize>() {
             Ok(value) => Ok(value),
-            _ => Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!(
-                    "Invalid HTTP status code  in buffer `{}`.",
-                    String::from_utf8_lossy(status_code)
-                ),
+            _ => Err(HttpParseError::StatusCode(
+                String::from_utf8_lossy(status_code).to_string(),
             )),
         }
     }
@@ -329,7 +314,7 @@ impl<'a, R: Read> HttpParser<'a, R> {
         headers
     }
 
-    fn parse_headers_two(&mut self, headers: &mut Vec<HttpHeader>) -> std::io::Result<()> {
+    fn parse_headers_two(&mut self, headers: &mut Vec<HttpHeader>) -> Result<(), HttpParseError> {
         while !self.is_line_end()? {
             let mut name = Vec::new();
             let mut value = Vec::new();

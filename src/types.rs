@@ -1003,3 +1003,56 @@ impl Default for HttpUrlBuilder {
         Self::new()
     }
 }
+
+#[derive(Debug)]
+pub enum HttpParseError {
+    Method(String),
+    Version(String),
+    Url(String),
+    StatusCode(String),
+    Header(String),
+    Other(String),
+}
+
+impl Display for HttpParseError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            HttpParseError::Method(value) => write!(f, "Unsupported HTTP Method `{}`", value),
+            HttpParseError::Version(value) => write!(f, "Unsupported HTTP Version `{}`", value),
+            HttpParseError::Url(value) => write!(f, "Invalid HTTP URL `{}`", value),
+            HttpParseError::StatusCode(value) => write!(f, "Invalid HTTP Status Code `{}`", value),
+            HttpParseError::Header(value) => write!(f, "Error reading header `{}`", value),
+            HttpParseError::Other(value) => write!(f, "Read error: `{}`", value),
+        }
+    }
+}
+
+impl core::error::Error for HttpParseError {}
+
+impl From<std::io::Error> for HttpParseError {
+    fn from(value: std::io::Error) -> Self {
+        Self::Other(value.to_string())
+    }
+}
+impl From<HttpParseError> for std::io::Error {
+    fn from(value: HttpParseError) -> Self {
+        match value {
+            HttpParseError::Method(value) => {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, value)
+            }
+            HttpParseError::Version(value) => {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, value)
+            }
+            HttpParseError::Url(value) => {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, value)
+            }
+            HttpParseError::StatusCode(value) => {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, value)
+            }
+            HttpParseError::Header(value) => {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, value)
+            }
+            HttpParseError::Other(value) => std::io::Error::new(std::io::ErrorKind::Other, value),
+        }
+    }
+}

@@ -1,10 +1,13 @@
+#[path = "./threadpool.rs"]
+mod threadpool;
+
 use std::{
     io::Write,
     net::{TcpListener, TcpStream},
     sync::Arc,
 };
 
-use http_parse::{threadpool, HttpParser, HttpResponseBuilder};
+use http_parse::{HttpParser, HttpResponseBuilder};
 
 pub struct Server {
     inner: TcpListener,
