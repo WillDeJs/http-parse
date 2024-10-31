@@ -9,12 +9,13 @@ A hand-written and naive implementation of a parser for the HTTP Protocol.
  This libary does not aim to be complete but instead to be an educational project.
  ## Example Parsing a Simple Response: ##
  ```Rust
- use http_parse::{HttpHeader, HttpResponseBuilder, HttpMethod, HttpVersion, HttpParser, ByteBuffer};
+ use std::io::Cursor;
+ use http_parse::{HttpHeader, HttpResponseBuilder, HttpMethod, HttpVersion, HttpParser};
  let request = "GET / HTTP/1.1\r
  Host: developer.mozilla.org\r
  Accept-Language: fr\r\n";
 
-let mut reader = ByteBuffer::new(request.as_bytes());
+let mut reader = Cursor::new(request.as_bytes());
 let mut parser = HttpParser::from_reader(&mut reader);
 let request = parser.request().unwrap();
 

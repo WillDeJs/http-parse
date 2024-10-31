@@ -16,11 +16,11 @@ use crate::{
 ///
 /// # Example:
 /// ```no_run
-///   use http_parse::ByteBuffer;
+///   use std::io::Cursor;
 ///   let request_text =
 ///         "GET / HTTP/1.1\r\nHost: developer.mozilla.org\r\nAccept-Language: fr\r\n\r\n";
 ///         
-///  let mut reader = ByteBuffer::new(request_text.as_bytes());
+///  let mut reader = Cursor::new(request_text.as_bytes());
 ///  let mut parser = http_parse::HttpParser::from_reader(&mut reader);
 ///  let request = parser.request().unwrap();
 ///  assert_eq!(&request.into_bytes(), request_text.as_bytes());
@@ -376,62 +376,5 @@ impl<'a, R: Read> HttpParser<'a, R> {
             self.reader.consume(2);
         }
         Ok(())
-    }
-}
-
-/// A ByteBuffer data container which implements Read.
-/// Useful for when HTTP data is exist in memory andthe HttpParser is used for parsing it.
-///
-/// # Example:
-/// ```no_run
-/// # use http_parse::ByteBuffer;
-/// # use http_parse::H_TRANSFER_ENCODING;
-/// # use http_parse::H_HOST;
-/// # use http_parse::HttpRequestBuilder;
-/// # use http_parse::HttpHeader;
-/// let range_value = "0-5000/10000";
-/// let response_text="HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nTransfer-Encoding: chunked\r\n\r\n7\r\nMozilla\r\n11\r\nDeveloper Network\r\n0\r\n\r\n";
-///
-/// let mut reader = ByteBuffer::new(response_text.as_bytes());
-/// let mut parser = http_parse::HttpParser::from_reader(&mut reader);
-/// let response = parser.response().unwrap();
-/// let transfer_header = HttpHeader::new("Transfer-Encoding", "chunked");
-///
-/// assert_eq!(Some(&transfer_header), response.header(H_TRANSFER_ENCODING));
-/// assert_eq!(response.data(), b"MozillaDeveloper Network");
-/// assert_eq!(response.into_bytes(), response_text.as_bytes());
-/// ```
-pub struct ByteBuffer {
-    inner: Vec<u8>,
-    index: usize,
-}
-#[allow(dead_code)]
-impl ByteBuffer {
-    pub fn new(buffer: &[u8]) -> Self {
-        Self {
-            inner: buffer.to_vec(),
-            index: 0,
-        }
-    }
-}
-
-impl Read for ByteBuffer {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        let buf_len = buf.len();
-        let inner_len = self.inner.len();
-        let start = self.index;
-
-        if start + buf_len <= inner_len {
-            buf.copy_from_slice(&self.inner[start..start + buf_len]);
-            self.index += buf_len;
-            Ok(buf_len)
-        } else if start < inner_len {
-            let leftover_count = inner_len - self.index;
-            buf[0..leftover_count].copy_from_slice(&self.inner[start..start + leftover_count]);
-            self.index += leftover_count;
-            Ok(leftover_count)
-        } else {
-            Ok(0) // done reading
-        }
     }
 }

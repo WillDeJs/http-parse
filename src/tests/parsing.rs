@@ -1,7 +1,7 @@
 use http_parse::{
-    ByteBuffer, HttpHeader, HttpMethod, HttpParser, HttpUrl, HttpVersion, StatusCode,
-    H_TRANSFER_ENCODING,
+    HttpHeader, HttpMethod, HttpParser, HttpUrl, HttpVersion, StatusCode, H_TRANSFER_ENCODING,
 };
+use std::io::Cursor;
 
 #[test]
 fn test_response() {
@@ -13,7 +13,7 @@ Content-Length: 45\r
 \r
 <!doctype html>
 <!-- HTML content follows -->";
-    let mut reader = ByteBuffer::new(response.as_bytes());
+    let mut reader = Cursor::new(response.as_bytes());
     let mut parser = HttpParser::from_reader(&mut reader);
     let response = parser.response().unwrap();
     assert_eq!(response.version(), HttpVersion::Http11);
@@ -36,7 +36,7 @@ Content-Length: 44\r
 \r
 <!doctype html><!-- HTML content follows -->";
 
-    let mut reader = ByteBuffer::new(response_text.as_bytes());
+    let mut reader = Cursor::new(response_text.as_bytes());
     let mut parser = HttpParser::from_reader(&mut reader);
     let response = parser.response().unwrap();
     assert_eq!(response_text.as_bytes(), &response.into_bytes());
@@ -48,7 +48,7 @@ fn test_request() {
 Host: developer.mozilla.org\r
 Accept-Language: fr\r\n";
 
-    let mut reader = ByteBuffer::new(request.as_bytes());
+    let mut reader = Cursor::new(request.as_bytes());
     let mut parser = HttpParser::from_reader(&mut reader);
     let request = parser.request().unwrap();
 
@@ -62,7 +62,7 @@ fn test_request_bytes() {
     let request_text =
         "GET / HTTP/1.1\r\nHost: developer.mozilla.org\r\nAccept-Language: fr\r\n\r\n";
 
-    let mut reader = ByteBuffer::new(request_text.as_bytes());
+    let mut reader = Cursor::new(request_text.as_bytes());
     let mut parser = http_parse::HttpParser::from_reader(&mut reader);
     let request = parser.request().unwrap();
     assert_eq!(&request.into_bytes(), request_text.as_bytes());
@@ -72,7 +72,7 @@ fn test_request_bytes() {
 fn test_response_body_chuncked() {
     let response_text="HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nTransfer-Encoding: chunked\r\n\r\n7\r\nMozilla\r\n11\r\nDeveloper Network\r\n0\r\n\r\n";
 
-    let mut reader = ByteBuffer::new(response_text.as_bytes());
+    let mut reader = Cursor::new(response_text.as_bytes());
     let mut parser = http_parse::HttpParser::from_reader(&mut reader);
     let response = parser.response().unwrap();
     let transfer_header = HttpHeader::new("Transfer-Encoding", "chunked");
