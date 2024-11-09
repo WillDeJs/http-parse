@@ -1,6 +1,9 @@
 #[derive(Clone, PartialEq, Debug)]
 pub struct StatusCode(pub(crate) usize, pub(crate) &'static str);
 
+pub const DEFAULT_HTTP_PORT: u16 = 80;
+pub const DEFAULT_HTTPS_PORT: u16 = 443;
+
 impl StatusCode {
     pub const CONTINUE: Self = Self(S_CONTINUE, M_CONTINUE);
     pub const SWITCHING_PROTOCOLS: Self = Self(S_SWITCHING_PROTOCOLS, M_SWITCHING_PROTOCOLS);
@@ -354,3 +357,6 @@ pub const MIME_TYPE_3GP_AUDIO: &str = "audio/3gpp";
 pub const MIME_TYPE_3G2: &str = "video/3gpp2";
 pub const MIME_TYPE_3G2_AUDIO: &str = "audio/3gpp2";
 pub const MIME_TYPE_7Z: &str = "application/x-7z-compressed";
+
+pub const MINE_MULTIPART_FORM: &str = "multipart/form-data";
+pub const MINE_URLENCODED_FORM: &str = "application/x-www-form-urlencoded";

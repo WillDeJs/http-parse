@@ -4,7 +4,9 @@ use std::{
     str::FromStr,
 };
 
-use crate::{StatusCode, H_CONTENT_LENGTH, H_TRANSFER_ENCODING};
+use crate::{
+    StatusCode, DEFAULT_HTTPS_PORT, DEFAULT_HTTP_PORT, H_CONTENT_LENGTH, H_TRANSFER_ENCODING,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum HttpMethod {
@@ -754,7 +756,7 @@ impl TryFrom<&str> for HttpUrl {
 ///         .host("www.google.com")
 ///         .build();
 /// ```
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct HttpUrl {
     scheme: String,
     host: String,
@@ -789,7 +791,12 @@ impl HttpUrl {
         if let Some(port) = self.port() {
             format!("{}:{}", self.host(), port)
         } else {
-            self.host().to_string()
+            let port = if self.scheme.eq("https") {
+                DEFAULT_HTTPS_PORT
+            } else {
+                DEFAULT_HTTP_PORT
+            };
+            format!("{}:{}", self.host, port)
         }
     }
 
@@ -843,7 +850,11 @@ impl HttpUrl {
     pub fn parse(url: &str) -> Result<HttpUrl, &'static str> {
         let (scheme, remainder) = if let Some(pos) = url.find("://") {
             let (scheme, remainder) = url.split_at(pos);
-            (scheme.to_string(), &remainder[3..])
+            if scheme.eq("http") || scheme.eq("https") {
+                (scheme.to_string(), &remainder[3..])
+            } else {
+                return Err("Invalid scheme provided, supported only `HTTP` and `HTTPS`");
+            }
         } else {
             ("http".to_string(), url)
         };
