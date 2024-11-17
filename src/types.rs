@@ -817,7 +817,12 @@ impl HttpUrl {
         if self.path.ends_with("/") || !self.path.contains('.') {
             None
         } else {
-            self.path.split("/").last()
+            if self.path.contains("?") || self.path.contains("#") {
+                let file_path = self.path.split("/").last().unwrap();
+                file_path.split(['?', '#']).nth(0)
+            } else {
+                self.path.split("/").last()
+            }
         }
     }
     /// Get the URL's taget. This contains the
