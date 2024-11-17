@@ -70,6 +70,7 @@ impl PartialEq<StatusCode> for usize {
 pub const H_ACCEPT: &str = "Accept";
 pub const H_ACCEPT_CHARSET: &str = "Accept-Charset";
 pub const H_ACCEPT_LANGAUGE: &str = "Accept-Language";
+pub const H_ACCEPT_ENCODING: &str = "Accept-Encoding";
 pub const H_ACCEPT_RANGES: &str = "Accept-Ranges";
 pub const H_AGE: &str = "Age";
 pub const H_ALLOW: &str = "Allow";
