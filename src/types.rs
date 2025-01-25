@@ -67,7 +67,7 @@ impl HttpHeader {
     /// Get the value for this header, parse it to the type T if possible.
     ///
     /// # Errors
-    /// If the type T cannot be constructe from the stored string value.
+    /// If the type T cannot be constructed from the stored string value.
     pub fn value<T: FromStr>(&self) -> Result<T, T::Err> {
         self.value.parse::<T>()
     }
@@ -143,7 +143,7 @@ impl HttpRequest {
         }
     }
 
-    /// Adds adata to the a request.
+    /// Adds data to the a request.
     /// This method automatically calculates the content size and accounts for chunked requests.
     /// # Arguments
     /// `data` the slice of data being added to the body of this request.
@@ -175,7 +175,7 @@ impl HttpRequest {
     /// Retrieve the value for a header with the give name.
     /// `name` the header being searched.
     ///
-    /// # Returns an optional vaue if it exist.
+    /// # Returns an optional value if it exist.
     pub fn header<T>(&self, name: T) -> Option<&HttpHeader>
     where
         T: AsRef<str>,
@@ -229,7 +229,7 @@ impl HttpRequest {
     }
 
     /// Convert this request into a byte vector.
-    /// Useful when transmitting a request accross a communication medium.
+    /// Useful when transmitting a request across a communication medium.
     pub fn into_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
         // first line, version + status code  + msg
@@ -410,13 +410,13 @@ impl HttpResponse {
     /// Retrieve the value for a header with the give name.
     /// `name` the header being searched.
     ///
-    /// # Returns an optional vaue if it exist.
+    /// # Returns an optional value if it exist.
     pub fn headers(&self) -> Vec<&HttpHeader> {
         self.headers.iter().collect()
     }
 
-    /// Convert this rsponse into a byte vector.
-    /// Useful when transmitting a request accross a communication medium.
+    /// Convert this response into a byte vector.
+    /// Useful when transmitting a request across a communication medium.
     pub fn into_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
         // first line, version + status code  + msg
@@ -546,7 +546,7 @@ impl HttpResponseBuilder {
     ///
     /// # Arguments
     /// `name`  name of the header being added.
-    /// `value` value being added for this header. Must have a type that implments `std::fmt::Display`
+    /// `value` value being added for this header. Must have a type that implements `std::fmt::Display`
     ///
     pub fn header<T>(mut self, name: &str, value: T) -> Self
     where
@@ -654,7 +654,7 @@ impl HttpRequestBuilder {
     ///
     /// # Arguments
     /// `name`  name of the header being added.
-    /// `value` value being added for this header. Must have a type that implments `std::fmt::Display`
+    /// `value` value being added for this header. Must have a type that implements `std::fmt::Display`
     ///
     pub fn header<T>(mut self, name: &str, value: T) -> Self
     where
@@ -825,7 +825,7 @@ impl HttpUrl {
             }
         }
     }
-    /// Get the URL's taget. This contains the
+    /// Get the URL's target. This contains the
     /// path + query arguments + fragment arguments if present.
     pub fn target(&self) -> String {
         let mut url = self.path.clone();
@@ -968,7 +968,7 @@ impl HttpUrlBuilder {
         self
     }
 
-    /// Assigh a host to the URL.
+    /// Assign a host to the URL.
     pub fn host(mut self, host: &str) -> Self {
         self.host = host.to_string();
         self

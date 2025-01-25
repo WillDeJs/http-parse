@@ -1,7 +1,7 @@
 //! A hand-written and naive implementation of a parser for the HTTP Protocol.
 //!
-//! This libary does not aim to be complete but instead to be an educational project.
-//! # Example parsing a simple resonse:
+//! This library does not aim to be complete but instead to be an educational project.
+//! # Example parsing a simple response:
 //! ```no_run
 //! use http_parse::{HttpHeader, HttpResponseBuilder, HttpMethod, HttpVersion, HttpParser};
 //! use std::io::Cursor;
@@ -37,7 +37,7 @@
 //!             .header(H_ACCEPT_RANGES, "bytes")
 //!             .header(H_CONNECTION, "close")
 //!             .header(H_HOST, "192.168.1.8")
-//!             .header(H_USER_AGENT, "Mozzila/5.0 (WD test)")
+//!             .header(H_USER_AGENT, "Mozilla/5.0 (WD test)")
 //!             .build();
 //!
 //!         // Send request to the server

@@ -6,7 +6,7 @@ This is some HTTP parsing library written in the most naive way possible just as
 
 A hand-written and naive implementation of a parser for the HTTP Protocol.
 
- This libary does not aim to be complete but instead to be an educational project.
+ This library does not aim to be complete but instead to be an educational project.
  ## Example Parsing a Simple Response: ##
  ```Rust
  use std::io::Cursor;

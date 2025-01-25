@@ -69,7 +69,7 @@ fn test_request_bytes() {
 }
 
 #[test]
-fn test_response_body_chuncked() {
+fn test_response_body_chunked() {
     let response_text="HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nTransfer-Encoding: chunked\r\n\r\n7\r\nMozilla\r\n11\r\nDeveloper Network\r\n0\r\n\r\n";
 
     let mut reader = Cursor::new(response_text.as_bytes());

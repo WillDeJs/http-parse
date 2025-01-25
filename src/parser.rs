@@ -12,7 +12,7 @@ use crate::{
 /// Currently this implementation only follows HTTP 1.1.
 /// This parser is a naive implementation of a parser of the HTTP protocol.
 ///
-/// The parser supports partsing Responses from any structure that implements the `std::io::Read`` trait.
+/// The parser supports parsing Responses from any structure that implements the `std::io::Read`` trait.
 ///
 /// # Example:
 /// ```no_run
@@ -40,7 +40,7 @@ impl<'a, R: Read> HttpParser<'a, R> {
 
     /// Parse a `HttpResponse` by reading bytes in this reader/stream.
     ///
-    /// The Response parsed through this methos includes:
+    /// The Response parsed through this methods includes:
     /// `HttpHeader`
     /// `HttpVersion`
     /// `StatusCode`
@@ -54,7 +54,7 @@ impl<'a, R: Read> HttpParser<'a, R> {
 
     /// Parse a `HttpResponse` by reading bytes in this reader/stream.
     ///
-    /// The Response parsed through this methos includes:
+    /// The Response parsed through this methods includes:
     /// `HttpHeader`
     /// `HttpVersion`
     /// `StatusCode`
@@ -112,7 +112,7 @@ impl<'a, R: Read> HttpParser<'a, R> {
 
     /// Parse a `HttpRequest` by reading bytes in this reader/stream.
     ///
-    /// The Request parsed through this methos includes:
+    /// The Request parsed through this methods includes:
     /// `HttpHeader`
     /// `HttpMethod`
     /// `Requested URL`
@@ -126,7 +126,7 @@ impl<'a, R: Read> HttpParser<'a, R> {
 
     /// Parse a `HttpRequest` by reading bytes in this reader/stream.
     ///
-    /// The Request parsed through this methos includes:
+    /// The Request parsed through this methods includes:
     /// `HttpHeader`
     /// `HttpMethod`
     /// `Requested URL`
