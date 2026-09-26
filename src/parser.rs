@@ -1,7 +1,4 @@
-use std::{
-    io::{BufRead, BufReader, ErrorKind, Read},
-    str::ParseBoolError,
-};
+use std::io::{BufRead, BufReader, Read};
 
 use crate::{
     types::HttpParseError, HttpHeader, HttpMethod, HttpRequest, HttpResponse, HttpVersion,
@@ -28,14 +25,23 @@ use crate::{
 ///
 pub struct HttpParser<'a, R> {
     reader: BufReader<&'a mut R>,
+    max_body_size: usize,
 }
+
+const DEFAULT_MAX_BODY_SIZE: usize = 64 * 1024 * 1024;
 
 impl<'a, R: Read> HttpParser<'a, R> {
     /// Create a HTTP Parser from a reader that implements `std::io::Read`.
     pub fn from_reader(reader: &'a mut R) -> Self {
         Self {
             reader: BufReader::new(reader),
+            max_body_size: DEFAULT_MAX_BODY_SIZE,
         }
+    }
+
+    /// Set the maximum number of body bytes this parser will read or allocate.
+    pub fn set_max_body_size(&mut self, max_body_size: usize) {
+        self.max_body_size = max_body_size;
     }
 
     /// Parse a `HttpResponse` by reading bytes in this reader/stream.
@@ -98,12 +104,17 @@ impl<'a, R: Read> HttpParser<'a, R> {
             let encoding_header = response.header(H_TRANSFER_ENCODING).cloned();
             let content_header = response.header(H_CONTENT_LENGTH).cloned();
 
-            self.extract_body_data(
-                encoding_header,
-                content_header,
-                &mut response.chunks,
-                &mut response.body,
-            )?;
+            if !(100..200).contains(&response.status_code)
+                && !matches!(response.status_code, 204 | 205 | 304)
+            {
+                self.extract_body_data(
+                    encoding_header,
+                    content_header,
+                    true,
+                    &mut response.chunks,
+                    &mut response.body,
+                )?;
+            }
 
             response.chunked = !response.chunks.is_empty();
         }
@@ -174,6 +185,7 @@ impl<'a, R: Read> HttpParser<'a, R> {
             self.extract_body_data(
                 encoding_header,
                 content_header,
+                false,
                 &mut request.chunks,
                 &mut request.body,
             )?;
@@ -187,25 +199,54 @@ impl<'a, R: Read> HttpParser<'a, R> {
         &mut self,
         encoding_header: Option<HttpHeader>,
         content_header: Option<HttpHeader>,
+        read_to_eof: bool,
         chunks: &mut Vec<(usize, usize)>,
         body: &mut Vec<u8>,
     ) -> Result<(), HttpParseError> {
-        let mut chunked = false;
-        encoding_header.inspect(|h| {
-            if !h.value.contains("identity") {
-                chunked = true;
+        if let Some(header) = encoding_header {
+            let final_encoding = header.value.split(',').next_back().unwrap_or("").trim();
+            if !final_encoding.eq_ignore_ascii_case("chunked") {
+                return Err(HttpParseError::Header(format!(
+                    "unsupported Transfer-Encoding: {}",
+                    header.value
+                )));
             }
-        });
-        if chunked {
             self.read_chunked_body(body, chunks)?;
         } else if let Some(header) = content_header {
             match header.value::<usize>() {
                 Ok(length) => {
+                    if length > self.max_body_size {
+                        return Err(HttpParseError::Other(format!(
+                            "body exceeds configured maximum of {} bytes",
+                            self.max_body_size
+                        )));
+                    }
+                    body.try_reserve_exact(length).map_err(|error| {
+                        HttpParseError::Other(format!("unable to allocate body: {error}"))
+                    })?;
                     body.resize_with(length, || 0);
                     self.reader.read_exact(body)?;
                 }
                 Err(_e) => Err(HttpParseError::Header(header.to_string()))?,
             };
+        } else if read_to_eof {
+            let mut buffer = [0; 8192];
+            loop {
+                let read = self.reader.read(&mut buffer)?;
+                if read == 0 {
+                    break;
+                }
+                if read > self.max_body_size.saturating_sub(body.len()) {
+                    return Err(HttpParseError::Other(format!(
+                        "body exceeds configured maximum of {} bytes",
+                        self.max_body_size
+                    )));
+                }
+                body.try_reserve(read).map_err(|error| {
+                    HttpParseError::Other(format!("unable to allocate body: {error}"))
+                })?;
+                body.extend_from_slice(&buffer[..read]);
+            }
         }
 
         Ok(())
@@ -215,42 +256,61 @@ impl<'a, R: Read> HttpParser<'a, R> {
         &mut self,
         body: &mut Vec<u8>,
         chunks: &mut Vec<(usize, usize)>,
-    ) -> Result<(), std::io::Error> {
-        let mut buff = Vec::with_capacity(16);
-        while let Ok(n) = self.reader.read_until(b'\n', &mut buff) {
-            // done reading
-            if n == 0 {
-                buff.clear();
-                // done reading
-                break;
+    ) -> Result<(), HttpParseError> {
+        loop {
+            let mut size_line = Vec::new();
+            if self.reader.read_until(b'\n', &mut size_line)? == 0 || !size_line.ends_with(b"\r\n")
+            {
+                return Err(HttpParseError::Header(
+                    "incomplete chunk size line".to_string(),
+                ));
             }
 
-            // parse hex byte numbers contained in chunk
-            let digits_str = String::from_utf8_lossy(buff.trim_ascii()).to_string();
-            match usize::from_str_radix(&digits_str, 16) {
-                Ok(chunk_size) => {
-                    if chunk_size == 0 {
-                        let _ = self.reader.read_until(b'\n', &mut buff);
-                        break;
-                    } else {
-                        let mut chunk_buff = vec![0; chunk_size];
-                        self.reader.read_exact(&mut chunk_buff)?;
+            let size_text = String::from_utf8_lossy(&size_line[..size_line.len() - 2]);
+            let size_text = size_text.split(';').next().unwrap_or("").trim();
+            let chunk_size = usize::from_str_radix(size_text, 16)
+                .map_err(|_| HttpParseError::Header("invalid chunk size".to_string()))?;
 
-                        chunks.push((body.len(), body.len() + chunk_buff.len()));
-                        body.extend_from_slice(&chunk_buff);
+            if chunk_size == 0 {
+                loop {
+                    let mut trailer = Vec::new();
+                    if self.reader.read_until(b'\n', &mut trailer)? == 0
+                        || !trailer.ends_with(b"\r\n")
+                    {
+                        return Err(HttpParseError::Header(
+                            "incomplete chunk trailer".to_string(),
+                        ));
+                    }
+                    if trailer == b"\r\n" {
+                        chunks.push((0, 0));
+                        return Ok(());
                     }
                 }
-                Err(_) => break, // invalid reading of body for now just exit loop
             }
-            // ignore new line after chunk
-            let _ = self.reader.read_until(b'\n', &mut buff);
-            buff.clear();
+
+            if chunk_size > self.max_body_size.saturating_sub(body.len()) {
+                return Err(HttpParseError::Other(format!(
+                    "body exceeds configured maximum of {} bytes",
+                    self.max_body_size
+                )));
+            }
+
+            let start = body.len();
+            body.try_reserve_exact(chunk_size).map_err(|error| {
+                HttpParseError::Other(format!("unable to allocate body: {error}"))
+            })?;
+            body.resize(start + chunk_size, 0);
+            self.reader.read_exact(&mut body[start..])?;
+
+            let mut terminator = [0; 2];
+            self.reader.read_exact(&mut terminator)?;
+            if terminator != *b"\r\n" {
+                return Err(HttpParseError::Header(
+                    "invalid chunk terminator".to_string(),
+                ));
+            }
+            chunks.push((start, body.len()));
         }
-        // last chunk 0 data
-        if !chunks.is_empty() {
-            chunks.push((0, 0));
-        }
-        Ok(())
     }
 
     fn parse_method(method: &[u8]) -> Result<HttpMethod, HttpParseError> {
@@ -290,91 +350,32 @@ impl<'a, R: Read> HttpParser<'a, R> {
         }
     }
 
-    fn parse_headers(&mut self) -> Vec<HttpHeader> {
-        let mut headers = Vec::with_capacity(100);
-        let mut line = String::new();
-        while self.reader.read_line(&mut line).is_ok() {
-            // empty line between request and body, we are done
-            if line.trim().is_empty() {
-                break;
-            } else {
-                if let Some(index) = line.find(':') {
-                    if index < line.len() {
-                        let name = line[0..index].to_string().trim().to_string();
-                        let value = line[index + 1..line.len()]
-                            .trim_ascii_start()
-                            .replace(['\r', '\n'], "")
-                            .to_string();
-                        headers.push(HttpHeader { name, value });
-                    }
-                }
-                line.clear();
-            }
-        }
-        headers
-    }
-
     fn parse_headers_two(&mut self, headers: &mut Vec<HttpHeader>) -> Result<(), HttpParseError> {
-        while !self.is_line_end()? {
-            let mut name = Vec::new();
-            let mut value = Vec::new();
-            let name_len = self.reader.read_until(b':', &mut name)?;
-            self.skip_matching(|byte| (byte as char).is_whitespace())?;
-            let value_len = self.reader.read_until(b'\n', &mut value)?;
-            headers.push(HttpHeader::new(
-                String::from_utf8_lossy(&name[0..name_len - 1]),
-                String::from_utf8_lossy(&value[0..value_len - 2]),
-            ));
-        }
-        self.skip_next_line();
-        Ok(())
-    }
-
-    fn skip_matching<F>(&mut self, f: F) -> std::io::Result<usize>
-    where
-        F: Fn(u8) -> bool,
-    {
-        let mut read = 0;
         loop {
-            let (done, used) = {
-                let available = match self.reader.fill_buf() {
-                    Ok(n) => n,
-                    Err(ref e) if e.kind() == ErrorKind::Interrupted => continue,
-                    Err(e) => return Err(e),
-                };
-                match available.iter().position(|byte| !f(*byte)) {
-                    Some(index) => (true, index),
-                    None => (false, 0),
-                }
-            };
-            self.reader.consume(used);
-            read += used;
-            if done || used == 0 {
-                return Ok(read);
+            let mut line = Vec::new();
+            let line_len = self.reader.read_until(b'\n', &mut line)?;
+            if line_len == 0 {
+                return Ok(());
             }
-        }
-    }
-
-    fn is_line_end(&mut self) -> std::io::Result<bool> {
-        if self.reader.buffer().len() >= 2 {
-            Ok(self.reader.buffer().starts_with(b"\r\n"))
-        } else {
-            loop {
-                match self.reader.fill_buf() {
-                    Ok(available) => {
-                        return Ok(available.is_empty() || available.starts_with(b"\r\n"))
-                    }
-                    Err(ref e) if e.kind() == ErrorKind::Interrupted => continue,
-                    Err(e) => return Err(e),
-                };
+            if !line.ends_with(b"\n") {
+                return Err(HttpParseError::Header("incomplete header line".to_string()));
             }
-        }
-    }
+            line.pop();
+            if line.last() == Some(&b'\r') {
+                line.pop();
+            }
+            if line.is_empty() {
+                return Ok(());
+            }
 
-    fn skip_next_line(&mut self) -> std::io::Result<()> {
-        if self.is_line_end()? {
-            self.reader.consume(2);
+            let separator = line
+                .iter()
+                .position(|byte| *byte == b':')
+                .filter(|index| *index > 0)
+                .ok_or_else(|| HttpParseError::Header("invalid header line".to_string()))?;
+            let name = String::from_utf8_lossy(&line[..separator]);
+            let value = String::from_utf8_lossy(&line[separator + 1..]);
+            headers.push(HttpHeader::new(name.trim(), value.trim()));
         }
-        Ok(())
     }
 }

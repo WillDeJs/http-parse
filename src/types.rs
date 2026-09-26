@@ -500,7 +500,7 @@ impl Display for HttpResponse {
 /// # Example
 /// ```no_run
 ///   use http_parse::HttpResponseBuilder;
-
+///
 ///   let mut response = HttpResponseBuilder::new()
 ///         .header("Content-Type", "text/plain")
 ///         .header("Content-Length", 11)
@@ -1068,7 +1068,7 @@ impl From<HttpParseError> for std::io::Error {
             HttpParseError::Header(value) => {
                 std::io::Error::new(std::io::ErrorKind::InvalidData, value)
             }
-            HttpParseError::Other(value) => std::io::Error::new(std::io::ErrorKind::Other, value),
+            HttpParseError::Other(value) => std::io::Error::other(value),
         }
     }
 }

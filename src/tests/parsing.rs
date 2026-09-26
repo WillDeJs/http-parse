@@ -83,6 +83,49 @@ fn test_response_body_chunked() {
 }
 
 #[test]
+fn test_response_body_delimited_by_eof() {
+    let response_text = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nbody";
+    let mut reader = Cursor::new(response_text.as_bytes());
+    let mut parser = HttpParser::from_reader(&mut reader);
+
+    let response = parser.response().unwrap();
+    assert_eq!(response.data(), b"body");
+}
+
+#[test]
+fn test_incomplete_header_returns_error() {
+    let request_text = "GET / HTTP/1.1\r\nX:";
+    let mut reader = Cursor::new(request_text.as_bytes());
+    let mut parser = HttpParser::from_reader(&mut reader);
+
+    assert!(parser.request().is_err());
+}
+
+#[test]
+fn test_invalid_chunk_size_returns_error() {
+    let response_text = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nnot-hex\r\n";
+    let mut reader = Cursor::new(response_text.as_bytes());
+    let mut parser = HttpParser::from_reader(&mut reader);
+
+    assert!(parser.response().is_err());
+}
+
+#[test]
+fn test_body_size_limit_applies_to_content_length_and_chunks() {
+    let fixed_response = "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n";
+    let mut reader = Cursor::new(fixed_response.as_bytes());
+    let mut parser = HttpParser::from_reader(&mut reader);
+    parser.set_max_body_size(4);
+    assert!(parser.response().is_err());
+
+    let chunked_response = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\n";
+    let mut reader = Cursor::new(chunked_response.as_bytes());
+    let mut parser = HttpParser::from_reader(&mut reader);
+    parser.set_max_body_size(4);
+    assert!(parser.response().is_err());
+}
+
+#[test]
 fn test_status_code_conversion() {
     assert_eq!(StatusCode::OK, 200);
     assert_eq!(200, StatusCode::OK);
